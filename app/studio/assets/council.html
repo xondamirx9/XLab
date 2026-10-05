@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Совет агентов</title>
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&amp;family=Onest:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+:root{--bg:#F6F5FB;--panel:#FFFFFF;--text:#16131F;--muted:#6A6580;--line:#E6E3F0;--brand:#6D5BFF;--brand2:#FF6FB1;
+  --agree:#13A26B;--object:#E5484D;--propose:#E5A50A;--decision:#6D5BFF;--lesson:#9B5DE5;--task:#0EA5E9;--review:#F97316;--shadow:0 20px 50px -30px rgba(22,19,31,.35)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0B0A12;--panel:#14121F;--text:#EEEAF8;--muted:#9C97B4;--line:#26223A;--shadow:0 20px 50px -30px #000}}
+:root[data-theme="dark"]{--bg:#0B0A12;--panel:#14121F;--text:#EEEAF8;--muted:#9C97B4;--line:#26223A;--shadow:0 20px 50px -30px #000}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 Onest,system-ui,sans-serif}
+button,input,select{font:inherit;color:inherit}
+.top{position:sticky;top:0;z-index:5;display:flex;gap:16px;align-items:center;padding:14px 20px;background:color-mix(in srgb,var(--bg) 80%,transparent);backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:12px;font:700 1.05rem/1 Unbounded,sans-serif}
+.brand i{width:34px;height:34px;border-radius:11px;background:conic-gradient(from 200deg,var(--brand),var(--brand2),var(--brand));display:grid;place-items:center;font-style:normal;color:#fff;animation:spin 12s linear infinite}
+@keyframes spin{to{filter:hue-rotate(360deg)}}
+.live{display:inline-flex;align-items:center;gap:7px;padding:5px 11px;border-radius:99px;background:color-mix(in srgb,var(--agree) 14%,transparent);color:var(--agree);font-size:.8rem;font-weight:600}
+.live::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor;animation:pulse 1.6s infinite}
+@keyframes pulse{50%{opacity:.25}}
+.kpis{display:flex;gap:18px;margin-left:auto;color:var(--muted);font-size:.85rem}
+.kpis b{color:var(--text);font:700 1rem Unbounded,sans-serif;margin-right:4px}
+.layout{display:grid;grid-template-columns:300px minmax(0,1fr) 340px;gap:18px;padding:18px 20px;max-width:1700px;margin:0 auto}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);overflow:hidden}
+.panel h2{margin:0;padding:16px 18px 10px;font:600 .78rem/1 Onest;text-transform:uppercase;letter-spacing:.14em;color:var(--muted)}
+.agents{display:grid;gap:4px;padding:6px 8px 12px;max-height:calc(100vh - 140px);overflow:auto}
+.agent{display:grid;grid-template-columns:40px 1fr auto;gap:10px;align-items:center;padding:8px 10px;border-radius:12px;border:1px solid transparent;background:none;text-align:left;cursor:pointer;transition:.2s}
+.agent:hover,.agent.on{background:color-mix(in srgb,var(--brand) 8%,transparent);border-color:color-mix(in srgb,var(--brand) 25%,transparent)}
+.ava{width:40px;height:40px;border-radius:13px;display:grid;place-items:center;font-size:1.25rem;background:color-mix(in srgb,var(--h) 18%,var(--panel));border:1px solid color-mix(in srgb,var(--h) 35%,transparent);position:relative}
+.ava.speaking::after{content:"";position:absolute;inset:-4px;border-radius:16px;border:2px solid var(--h);animation:ring 1.2s ease-out infinite}
+@keyframes ring{from{opacity:1;transform:scale(.9)}to{opacity:0;transform:scale(1.2)}}
+.agent b{display:block;font-weight:600;font-size:.92rem}
+.agent small{color:var(--muted);font-size:.78rem}
+.lvl{font:700 .7rem Unbounded;padding:4px 7px;border-radius:8px;background:linear-gradient(135deg,var(--brand),var(--brand2));color:#fff;white-space:nowrap}
+.feed-head{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line)}
+.tabs{display:flex;flex-wrap:wrap;gap:6px}
+.tab{padding:6px 12px;border-radius:99px;border:1px solid var(--line);background:none;cursor:pointer;font-size:.85rem;color:var(--muted)}
+.tab.on{background:var(--text);color:var(--bg);border-color:var(--text)}
+select{padding:7px 10px;border-radius:10px;border:1px solid var(--line);background:var(--panel);max-width:260px;margin-left:auto}
+.feed{height:calc(100vh - 200px);overflow:auto;padding:16px 18px 40px;display:flex;flex-direction:column;gap:12px;scroll-behavior:smooth}
+.msg{display:grid;grid-template-columns:40px 1fr;gap:12px;animation:in .45s cubic-bezier(.2,.8,.2,1)}
+@keyframes in{from{opacity:0;transform:translateY(10px)}}
+.bubble{position:relative;padding:11px 14px 12px;border-radius:4px 16px 16px 16px;background:color-mix(in srgb,var(--text) 4%,var(--panel));border:1px solid var(--line);border-left:3px solid var(--k,var(--line))}
+.meta{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;margin-bottom:3px;font-size:.8rem;color:var(--muted)}
+.meta b{color:var(--text);font-size:.9rem}
+.badge{padding:2px 8px;border-radius:99px;font-size:.72rem;font-weight:600;color:var(--k);background:color-mix(in srgb,var(--k) 14%,transparent)}
+.extra{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.pill{padding:3px 9px;border-radius:8px;font-size:.78rem;background:color-mix(in srgb,var(--text) 6%,transparent)}
+.sw{display:inline-block;width:18px;height:18px;border-radius:6px;border:1px solid var(--line);vertical-align:middle}
+.sys{align-self:center;max-width:80%;text-align:center;font-size:.85rem;color:var(--muted);padding:6px 14px;border-radius:99px;background:color-mix(in srgb,var(--text) 5%,transparent)}
+.side{display:grid;gap:18px;align-content:start;max-height:calc(100vh - 110px);overflow:auto}
+.card-p{padding:4px 18px 18px}
+.proj-name{font:700 1.15rem Unbounded,sans-serif;margin:4px 0 6px}
+.status{display:inline-flex;gap:6px;align-items:center;font-size:.8rem;font-weight:600;padding:4px 10px;border-radius:99px;background:color-mix(in srgb,var(--brand) 12%,transparent);color:var(--brand)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:11px 16px;border-radius:12px;border:0;cursor:pointer;font-weight:600;text-decoration:none;color:#fff;background:linear-gradient(120deg,var(--brand),var(--brand2));margin-top:12px;width:100%}
+.kanban{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 14px 16px}
+.col h3{margin:0 0 8px;font-size:.75rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
+.task{padding:9px 10px;border-radius:10px;border:1px solid var(--line);margin-bottom:6px;font-size:.82rem}
+.task .route{color:var(--muted);font-size:.75rem}
+.task.done{opacity:.6}
+.lesson{padding:10px 18px;border-top:1px solid var(--line);font-size:.86rem}
+.lesson .bar{height:4px;border-radius:4px;background:var(--line);margin-top:6px;overflow:hidden}
+.lesson .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--lesson),var(--brand2))}
+.lesson.off{opacity:.45;text-decoration:line-through}
+.empty{padding:30px;text-align:center;color:var(--muted)}
+.login{position:fixed;inset:0;z-index:20;display:grid;place-items:center;background:var(--bg)}
+.login[hidden],[hidden]{display:none!important}
+.login form{width:min(380px,92vw);padding:30px;border-radius:20px;background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow);display:grid;gap:12px}
+.login input{padding:13px 14px;border-radius:12px;border:1px solid var(--line);background:var(--bg)}
+.login h1{margin:0;font:700 1.3rem Unbounded,sans-serif}
+.login p{margin:0;color:var(--muted);font-size:.9rem}
+.err{color:var(--object);font-size:.85rem;min-height:1.2em}
+@media (max-width:1200px){.layout{grid-template-columns:1fr 340px}.agents-panel{display:none}}
+@media (max-width:820px){.layout{grid-template-columns:1fr;padding:12px}.kpis{display:none}.feed{height:65vh}.side{max-height:none}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><i>✦</i><span id="title">Совет агентов</span></div>
+  <span class="live">в эфире</span>
+  <div class="kpis" id="kpis"></div>
+</header>
+<div class="layout">
+  <aside class="panel agents-panel"><h2>20 агентов</h2><div class="agents" id="agents"></div></aside>
+  <main class="panel">
+    <div class="feed-head">
+      <div class="tabs" id="tabs"></div>
+      <select id="project" aria-label="Проект"></select>
+    </div>
+    <div class="feed" id="feed" aria-live="polite"></div>
+  </main>
+  <aside class="side">
+    <section class="panel" id="proj-panel"><h2>Проект</h2><div class="card-p" id="proj"></div></section>
+    <section class="panel"><h2>Задачи между агентами</h2><div class="kanban" id="kanban"></div></section>
+    <section class="panel" id="lessons-panel"><h2>Уроки команды</h2><div id="lessons"></div></section>
+  </aside>
+</div>
+<div class="login" id="login" hidden>
+  <form id="login-form">
+    <h1>Совет агентов</h1>
+    <p>Здесь 20 агентов спорят, раздают друг другу задачи и учатся. Введите пароль администратора (ADMIN_PASSWORD).</p>
+    <input id="pwd" type="password" autocomplete="current-password" placeholder="Пароль" required>
+    <div class="err" id="login-err"></div>
+    <button class="btn" type="submit">Войти</button>
+  </form>
+</div>
+<script>
+(function () {
+  "use strict";
+  var KIND = {say: ["", "--line"], propose: ["предлагает", "--propose"], agree: ["согласен", "--agree"], object: ["возражает", "--object"],
+    vote: ["голос", "--brand"], decision: ["решение", "--decision"], task: ["задача", "--task"], done: ["выполнено", "--agree"],
+    review: ["ревью", "--review"], lesson: ["урок", "--lesson"], system: ["", "--line"]};
+  var STANCE = {agree: ["за", "--agree"], object: ["против", "--object"], propose: ["доработка", "--propose"]};
+  var CHANNELS = ["все", "брифинг", "исследование", "спор", "задачи", "производство", "ревью", "ретро", "общий"];
+  var HUES = ["#6D5BFF", "#FF6FB1", "#13A26B", "#F97316", "#0EA5E9", "#E5A50A", "#9B5DE5", "#E5484D", "#14B8A6", "#8B5CF6"];
+  var token = (location.pathname.match(/^\/studio\/p\/([A-Za-z0-9_-]+)/) || [])[1] || "";
+  var publicMode = !!token;
+  var password = "";
+  try { password = sessionStorage.getItem("council-pwd") || ""; } catch (e) {}
+  var state = {agents: {}, agentList: [], after: 0, channel: "все", agent: "", project: "", messages: [], tasks: [], projects: [], lessons: []};
+  var $ = function (id) { return document.getElementById(id); };
+
+  function el(tag, cls, text) { var n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
+  function hue(id) { var h = 0; for (var i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % HUES.length; return HUES[h]; }
+  function time(iso) { try { return new Date(iso).toLocaleTimeString("ru-RU", {hour: "2-digit", minute: "2-digit"}); } catch (e) { return ""; } }
+
+  function api(path) {
+    var headers = publicMode ? {} : {Authorization: "Bearer " + encodeURIComponent(password)};
+    return fetch(path, {headers: headers, cache: "no-store"}).then(function (r) {
+      if (r.status === 401 || r.status === 403) { showLogin(r.status === 403 ? "На сервере не задан ADMIN_PASSWORD." : "Пароль не подошёл."); throw new Error("auth"); }
+      if (!r.ok) throw new Error(String(r.status));
+      return r.json();
+    });
+  }
+  function showLogin(msg) { $("login").hidden = false; $("login-err").textContent = msg || ""; $("pwd").focus(); }
+  $("login-form").addEventListener("submit", function (e) {
+    e.preventDefault(); password = $("pwd").value;
+    try { sessionStorage.setItem("council-pwd", password); } catch (err) {}
+    $("login").hidden = true; loadState().then(tick);
+  });
+
+  function renderTabs() {
+    var box = $("tabs"); box.textContent = "";
+    CHANNELS.forEach(function (c) {
+      var b = el("button", "tab" + (state.channel === c ? " on" : ""), c);
+      b.type = "button"; b.addEventListener("click", function () { state.channel = c; renderTabs(); renderFeed(true); });
+      box.appendChild(b);
+    });
+  }
+
+  function renderAgents(speaking) {
+    var box = $("agents"); box.textContent = "";
+    state.agentList.forEach(function (a) {
+      var b = el("button", "agent" + (state.agent === a.id ? " on" : ""));
+      b.type = "button"; b.title = a.role;
+      var ava = el("span", "ava" + (speaking && speaking[a.id] ? " speaking" : ""), a.emoji); ava.style.setProperty("--h", hue(a.id));
+      var info = el("span"); info.appendChild(el("b", null, a.name)); info.appendChild(el("small", null, a.role + " · " + a.messages + " реплик"));
+      var lvl = el("span", "lvl", "ур. " + a.level); lvl.title = "Уроков: " + a.lessons + (a.rating ? " · средняя оценка клиентов " + a.rating : "");
+      b.appendChild(ava); b.appendChild(info); b.appendChild(lvl);
+      b.addEventListener("click", function () { state.agent = state.agent === a.id ? "" : a.id; renderAgents(); renderFeed(true); });
+      box.appendChild(b);
+    });
+  }
+
+  function extras(m, box) {
+    var d = m.data || {};
+    var add = function (text) { box.appendChild(el("span", "pill", text)); };
+    if (d.stance && STANCE[d.stance]) { var s = el("span", "badge", STANCE[d.stance][0]); s.style.setProperty("--k", "var(" + STANCE[d.stance][1] + ")"); box.appendChild(s); }
+    if (d.vote) add("голос за концепцию " + d.vote);
+    if (d.score != null && m.kind === "review") add("оценка " + d.score + "/10");
+    if (d.avg != null) add("средняя " + d.avg);
+    if (d.tally) Object.keys(d.tally).forEach(function (k) { add("концепция " + k + ": " + d.tally[k]); });
+    if (d.palette) Object.keys(d.palette).forEach(function (k) { var p = el("span", "pill"); var sw = el("span", "sw"); sw.style.background = d.palette[k]; p.appendChild(sw); p.appendChild(document.createTextNode(" " + k)); box.appendChild(p); });
+    if (d.display) add("Aa " + d.display + " / " + d.body);
+    if (d.hero_title) add("«" + String(d.hero_title).replace(/\*/g, "") + "»");
+    if (d.concepts) d.concepts.forEach(function (c, i) { add((i + 1) + ". " + c.name); });
+    if (d.effects) add("эффекты: " + d.effects.join(", "));
+    if (d.issues) d.issues.forEach(function (i) { add("→ " + ((state.agents[i.owner] || {}).name || i.owner) + ": " + i.problem); });
+    if (d.lessons && d.lessons.forEach) d.lessons.forEach(function (l) { if (l.text) add("📌 " + l.text); else if (typeof l === "string") add("📌 " + l); });
+    if (d.version) add("версия " + d.version);
+  }
+
+  function messageNode(m) {
+    var a = state.agents[m.agent] || {name: m.agent, emoji: "•", role: ""};
+    if (m.kind === "system") return el("div", "sys", a.emoji + " " + m.content);
+    var row = el("div", "msg");
+    var ava = el("span", "ava", a.emoji); ava.style.setProperty("--h", hue(m.agent));
+    var bub = el("div", "bubble"); var k = KIND[m.kind] || KIND.say; bub.style.setProperty("--k", "var(" + k[1] + ")");
+    var meta = el("div", "meta"); meta.appendChild(el("b", null, a.name)); meta.appendChild(el("span", null, a.role));
+    if (k[0]) { var badge = el("span", "badge", k[0]); meta.appendChild(badge); }
+    if (m.reply_to && state.agents[m.reply_to]) meta.appendChild(el("span", null, "↩ " + state.agents[m.reply_to].name));
+    meta.appendChild(el("span", null, "#" + m.channel + " · " + time(m.created_at)));
+    bub.appendChild(meta); bub.appendChild(el("div", null, m.content));
+    var ex = el("div", "extra"); extras(m, ex); if (ex.childNodes.length) bub.appendChild(ex);
+    row.appendChild(ava); row.appendChild(bub);
+    return row;
+  }
+
+  function visible(m) {
+    return (state.channel === "все" || m.channel === state.channel) && (!state.agent || m.agent === state.agent || m.reply_to === state.agent);
+  }
+
+  function renderFeed(full, fresh) {
+    var feed = $("feed");
+    var nearBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 160;
+    if (full) { feed.textContent = ""; fresh = state.messages; }
+    (fresh || []).filter(visible).forEach(function (m) { feed.appendChild(messageNode(m)); });
+    if (!feed.childNodes.length) feed.appendChild(el("div", "empty", publicMode ? "Совет ещё не начал обсуждение…" : "Сообщений пока нет. Создайте проект в боте командой /site."));
+    if (full || nearBottom) feed.scrollTop = feed.scrollHeight;
+  }
+
+  function renderTasks() {
+    var box = $("kanban"); box.textContent = "";
+    var tasks = state.tasks.slice(-40);
+    [["open", "В работе"], ["done", "Готово"]].forEach(function (c) {
+      var col = el("div", "col"); col.appendChild(el("h3", null, c[1]));
+      tasks.filter(function (t) { return t.status === c[0]; }).slice(-12).reverse().forEach(function (t) {
+        var n = el("div", "task" + (t.status === "done" ? " done" : ""));
+        var from = state.agents[t.from_agent] || {name: t.from_agent, emoji: ""}, to = state.agents[t.to_agent] || {name: t.to_agent, emoji: ""};
+        n.appendChild(el("div", "route", from.emoji + " " + from.name + " → " + to.emoji + " " + to.name));
+        n.appendChild(el("div", null, t.title)); col.appendChild(n);
+      });
+      box.appendChild(col);
+    });
+  }
+
+  function renderProject(p) {
+    var box = $("proj"); box.textContent = "";
+    if (!p) { box.appendChild(el("div", "empty", "Все проекты")); return; }
+    box.appendChild(el("div", "proj-name", p.name));
+    var labels = {queued: "в очереди", running: "агенты работают", done: "готов", failed: "сбой"};
+    box.appendChild(el("span", "status", labels[p.status] || p.status));
+    var info = el("p", null, (p.niche ? p.niche + " · " : "") + (p.version ? "версия " + p.version + " · оценка команды " + p.review + "/10" : "собирается…")
+      + (p.rating ? " · клиент: " + p.rating + "★" : "") + (p.cost_usd != null ? " · $" + p.cost_usd : ""));
+    info.style.color = "var(--muted)"; box.appendChild(info);
+    if (p.url) { var a = el("a", "btn", "Открыть сайт ↗"); a.href = p.url; a.target = "_blank"; a.rel = "noopener"; box.appendChild(a); }
+  }
+
+  function renderLessons() {
+    var box = $("lessons"); box.textContent = "";
+    if (!state.lessons.length) { box.appendChild(el("div", "empty", "Уроков пока нет — они появятся после первого проекта.")); return; }
+    var max = Math.max.apply(null, state.lessons.map(function (l) { return l.score; }).concat([1]));
+    state.lessons.slice(0, 30).forEach(function (l) {
+      var n = el("div", "lesson" + (l.active ? "" : " off"));
+      var who = l.agent === "all" ? "Вся команда" : ((state.agents[l.agent] || {}).name || l.agent);
+      var head = el("div", null); head.appendChild(el("b", null, who + ": ")); head.appendChild(document.createTextNode(l.text));
+      n.appendChild(head);
+      var meta = el("small", null, "вес " + Number(l.score).toFixed(1) + " · применён " + l.uses + " раз"); meta.style.color = "var(--muted)"; n.appendChild(meta);
+      var bar = el("div", "bar"); var fill = el("i"); fill.style.width = Math.max(4, Math.min(100, l.score / max * 100)) + "%"; bar.appendChild(fill); n.appendChild(bar);
+      box.appendChild(n);
+    });
+  }
+
+  function renderKpis() {
+    var box = $("kpis"); box.textContent = "";
+    var total = state.agentList.reduce(function (s, a) { return s + a.messages; }, 0);
+    var lessons = state.lessons.filter(function (l) { return l.active; }).length;
+    [[state.projects.length || (publicMode ? 1 : 0), "проектов"], [total, "реплик"], [lessons, "уроков"]].forEach(function (k) {
+      var s = el("span"); s.appendChild(el("b", null, String(k[0]))); s.appendChild(document.createTextNode(k[1])); box.appendChild(s);
+    });
+  }
+
+  function setAgents(list) {
+    state.agentList = list; state.agents = {};
+    list.forEach(function (a) { state.agents[a.id] = a; });
+  }
+
+  function loadState() {
+    if (publicMode) return Promise.resolve();
+    return api("/api/council/state").then(function (d) {
+      setAgents(d.agents); state.projects = d.projects; state.lessons = d.lessons;
+      var sel = $("project"), current = state.project; sel.textContent = "";
+      var all = el("option", null, "Все проекты"); all.value = ""; sel.appendChild(all);
+      d.projects.forEach(function (p) { var o = el("option", null, "№" + p.id + " " + p.name + " · " + p.status); o.value = String(p.id); sel.appendChild(o); });
+      sel.value = current; renderAgents(); renderLessons(); renderKpis();
+      renderProject(d.projects.filter(function (p) { return String(p.id) === state.project; })[0]);
+      if (!state.project) { state.tasks = d.tasks.slice().reverse(); renderTasks(); }
+    });
+  }
+
+  $("project").addEventListener("change", function (e) {
+    state.project = e.target.value; state.after = 0; state.messages = [];
+    loadState().then(function () { tick(true); });
+  });
+
+  function tick(full) {
+    var url = publicMode ? "/api/studio/p/" + token + "/feed?after=" + state.after
+      : "/api/council/feed?after=" + state.after + (state.project ? "&project=" + state.project : "");
+    return api(url).then(function (d) {
+      if (publicMode) {
+        setAgents(d.agents); renderProject(d.project); $("title").textContent = "Совет · " + d.project.name;
+        state.lessons = []; $("lessons-panel").hidden = true; $("project").hidden = true;
+      }
+      var fresh = d.messages || [];
+      if (fresh.length) state.after = fresh[fresh.length - 1].id;
+      state.messages = state.messages.concat(fresh).slice(-1500);
+      if (d.tasks && (state.project || publicMode)) { state.tasks = d.tasks; renderTasks(); }
+      var speaking = {}; fresh.slice(-3).forEach(function (m) { speaking[m.agent] = true; });
+      if (full) { renderAgents(speaking); renderFeed(true); } else if (fresh.length) { renderAgents(speaking); renderFeed(false, fresh); }
+      renderKpis();
+    }).catch(function () {});
+  }
+
+  renderTabs();
+  if (!publicMode && !password) showLogin();
+  else loadState().then(function () { tick(true); });
+  setInterval(function () { if ($("login").hidden) tick(false); }, 2500);
+  setInterval(function () { if ($("login").hidden && !publicMode) loadState().catch(function () {}); }, 15000);
+})();
+</script>
+</body>
+</html>

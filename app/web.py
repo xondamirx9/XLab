@@ -8,6 +8,7 @@ import os
 import re
 import time
 from collections import defaultdict, deque
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Awaitable, Callable
@@ -16,7 +17,11 @@ from urllib.parse import unquote
 from aiohttp import web
 
 from app.config import Config
+from app.news import NewsStore
 from app.storage import Storage
+from app.studio.pipeline import Studio
+from app.studio.store import StudioStore
+from app.studio.web import setup_studio
 
 log = logging.getLogger("site.web")
 
@@ -30,6 +35,19 @@ CLIENT_ID = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
 # Шаги воронки. «order» сайт прислать не может: его считает сам сервер, когда заявка сохранена.
 SITE_EVENTS = ("visit", "brief_start", "brief_done")
 TASHKENT = timezone(timedelta(hours=5))
+
+
+@dataclass
+class StudioContext:
+    """Всё, что нужно HTTP-части студии и новостей."""
+
+    store: StudioStore
+    studio: Studio
+    news: NewsStore | None
+    sites_dir: Path
+    wake_worker: Callable[[], None]
+    wake_news: Callable[[], None]
+    claude: bool = False
 
 
 def today() -> str:
@@ -115,7 +133,7 @@ def _estimate_text(estimate: object) -> str:
 
 
 def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
-               bot_enabled: bool = False) -> web.Application:
+               bot_enabled: bool = False, studio: StudioContext | None = None) -> web.Application:
     order_limit = RateLimiter(limit=5, window=600)        # 5 заявок за 10 минут с одного адреса
     order_total = RateLimiter(limit=120, window=3600)     # и не больше 120 в час со всех адресов
     auth_fails = RateLimiter(limit=5, window=900)         # 5 неверных паролей за 15 минут
@@ -139,8 +157,24 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
         return web.FileResponse(cfg.index_file, headers={"Cache-Control": "no-cache"})
 
     async def health(request: web.Request) -> web.Response:
-        return web.json_response({"app": "varaq-site", "ok": True, "publish": cfg.publish_enabled, "bot": bot_enabled},
-                                 headers={"Cache-Control": "no-store"})
+        data = {"app": "varaq-site", "ok": True, "publish": cfg.publish_enabled, "bot": bot_enabled}
+        if studio is not None:
+            data["studio"] = "claude" if studio.claude else "offline"
+        return web.json_response(data, headers={"Cache-Control": "no-store"})
+
+    async def check_admin(request: web.Request) -> web.Response | None:
+        """Пароль администратора для служебного API. None — пускаем."""
+        ip = client_ip(request, cfg.trust_proxy)
+        if not cfg.publish_enabled:
+            return _json_error(403, "Не задан ADMIN_PASSWORD.")
+        if auth_fails.blocked(ip):
+            return _json_error(429, "Слишком много попыток. Подождите 15 минут.")
+        scheme, _, token = request.headers.get("Authorization", "").partition(" ")
+        password = unquote(token.strip()) if scheme.lower() == "bearer" else ""
+        if not hmac.compare_digest(password.encode("utf-8"), cfg.admin_password.encode("utf-8")):
+            auth_fails.hit(ip)
+            return _json_error(401, "Неверный пароль.")
+        return None
 
     async def order(request: web.Request) -> web.Response:
         ip = client_ip(request, cfg.trust_proxy)
@@ -238,6 +272,11 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
     app.router.add_post("/api/order", order)
     app.router.add_post("/api/event", event)
     app.router.add_post("/api/publish", publish)
+    if studio is not None:
+        setup_studio(app, store=studio.store, studio=studio.studio, news=studio.news, sites_dir=studio.sites_dir,
+                     check_admin=check_admin, client_ip=lambda request: client_ip(request, cfg.trust_proxy),
+                     limiter=lambda limit, window: RateLimiter(limit, window), wake_worker=studio.wake_worker,
+                     wake_news=studio.wake_news)
     return app
 
 

@@ -4,14 +4,22 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
+from typing import Callable
 
 from aiogram import Bot, Dispatcher, Router
 from aiogram.exceptions import TelegramAPIError, TelegramRetryAfter
 from aiogram.filters import Command, CommandObject, CommandStart
+from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, Message
 
 from app.config import Config
+from app.news import NewsStore
 from app.storage import Order, Storage
+from app.studio.pipeline import Studio
+from app.studio.store import StudioStore
+from app.user_bot import build_user_router, welcome_markup
+
+BRAND = "Varaq"
 
 log = logging.getLogger("site.bot")
 
@@ -110,22 +118,40 @@ class Notifier:
                 task.cancel()
 
 
-def build_dispatcher(cfg: Config, storage: Storage) -> Dispatcher:
+def build_dispatcher(cfg: Config, storage: Storage, *, news: NewsStore | None = None, studio_store: StudioStore | None = None,
+                     studio: Studio | None = None, wake_news: Callable[[], None] = lambda: None,
+                     wake_worker: Callable[[], None] = lambda: None) -> Dispatcher:
     router = Router()
     is_admin = lambda message: message.chat.id in cfg.admin_chat_ids
 
     @router.message(CommandStart())
-    async def start(message: Message) -> None:
+    async def start(message: Message, state: FSMContext) -> None:
+        await state.clear()
         if is_admin(message):
             await message.answer(
                 "Здравствуйте! Заявки с сайта приходят в этот чат.\n\n"
-                "/last — последние пять заявок\n/stats — воронка сайта за 7 и 30 дней\n/forget 12 — удалить заявку № 12 вместе с контактами клиента"
+                "/last — последние пять заявок\n/stats — воронка сайта за 7 и 30 дней\n/forget 12 — удалить заявку № 12 вместе с контактами клиента\n"
+                "/post Заголовок + текст — разослать новость подписчикам\n/subscribers — сколько подписчиков\n"
+                "/studio — проекты студии сайтов\n/lessons — чему научились агенты\n/site — создать сайт (без лимита)"
+            )
+        elif news is not None:
+            await news.subscribe(message.chat.id, message.from_user.full_name if message.from_user else "")
+            await message.answer(
+                f"Здравствуйте! Это бот студии {BRAND}.\n\n"
+                "🔔 Вы подписаны на наши новости — отписаться можно командой /stop.\n"
+                "🎨 А ещё здесь можно получить свой сайт: 20 ИИ-агентов соберут его под ваш стиль, поспорят о концепции "
+                "и проверят друг друга. Начать — кнопкой ниже или командой /site.",
+                reply_markup=welcome_markup(),
             )
         else:
             await message.answer(
                 f"Здравствуйте! Это служебный бот сайта.\n\nНомер этого чата: {message.chat.id}\n"
                 "Чтобы получать сюда заявки, впишите этот номер в ADMIN_CHAT_IDS в файле .env и перезапустите сервер."
             )
+
+    @router.message(Command("id"))
+    async def chat_id(message: Message) -> None:
+        await message.answer(f"Номер этого чата: {message.chat.id}\nДля заявок впишите его в ADMIN_CHAT_IDS в файле .env.")
 
     @router.message(Command("last"))
     async def last(message: Message) -> None:
@@ -163,4 +189,7 @@ def build_dispatcher(cfg: Config, storage: Storage) -> Dispatcher:
 
     dispatcher = Dispatcher()
     dispatcher.include_router(router)
+    if news is not None or studio_store is not None:
+        dispatcher.include_router(build_user_router(cfg, news=news, store=studio_store, studio=studio,
+                                                    wake_worker=wake_worker, wake_news=wake_news))
     return dispatcher
