@@ -1,14 +1,10 @@
 """Хранилище заявок в SQLite. Заявка сначала сохраняется, потом пересылается: при сбое Telegram она не теряется."""
 from __future__ import annotations
 
-import asyncio
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Callable, TypeVar
 
-T = TypeVar("T")
+from app.db import SQLiteStore, utc_now
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS orders (
@@ -58,31 +54,8 @@ def _row_to_order(row: sqlite3.Row) -> Order:
     )
 
 
-class Storage:
-    def __init__(self, path: Path) -> None:
-        self._path = path
-        self._lock = asyncio.Lock()
-
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._path, timeout=10)
-        conn.row_factory = sqlite3.Row
-        return conn
-
-    async def _run(self, work: Callable[[sqlite3.Connection], T]) -> T:
-        """Запросы идут по одному и в отдельном потоке, чтобы не тормозить сервер."""
-        def call() -> T:
-            conn = self._connect()
-            try:
-                with conn:
-                    return work(conn)
-            finally:
-                conn.close()
-        async with self._lock:
-            return await asyncio.to_thread(call)
-
-    async def init(self) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        await self._run(lambda conn: conn.executescript(SCHEMA))
+class Storage(SQLiteStore):
+    SCHEMA = SCHEMA
 
     async def add_order(self, *, client_id: str, name: str, phone: str, telegram: str, project: str,
                         estimate: str, text: str, brief_json: str) -> tuple[int, bool]:
@@ -94,7 +67,7 @@ class Storage:
             cursor = conn.execute(
                 "INSERT INTO orders (client_id, created_at, name, phone, telegram, project, estimate, text, brief_json) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (client_id, datetime.now(timezone.utc).isoformat(timespec="seconds"), name, phone, telegram, project,
+                (client_id, utc_now(), name, phone, telegram, project,
                  estimate, text, brief_json),
             )
             return int(cursor.lastrowid), True
