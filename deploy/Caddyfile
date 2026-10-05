@@ -1,0 +1,6 @@
+# Caddy сам получает и продлевает HTTPS-сертификат.
+# Замените varaq.uz на свой домен. Файл кладётся в /etc/caddy/Caddyfile
+varaq.uz, www.varaq.uz {
+    encode gzip
+    reverse_proxy 127.0.0.1:8080
+}

@@ -1,0 +1,6 @@
+.env
+data/
+site/backups/
+venv/
+__pycache__/
+*.pyc

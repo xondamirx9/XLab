@@ -1,0 +1,23 @@
+# Автозапуск сервера. Файл кладётся в /etc/systemd/system/varaq.service
+[Unit]
+Description=Varaq: сайт студии и приём заявок
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=varaq
+WorkingDirectory=/opt/varaq-server
+ExecStart=/opt/varaq-server/venv/bin/python -m app
+Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+# Сервису разрешено писать только в свои папки с данными и сайтом
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/varaq-server/data /opt/varaq-server/site
+
+[Install]
+WantedBy=multi-user.target
