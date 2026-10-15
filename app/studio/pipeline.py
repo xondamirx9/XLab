@@ -14,7 +14,7 @@ import random
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Iterable
 
 from app.studio import offline as fb
 from app.studio.agents import BY_ID, IDS, system_prompt
@@ -85,10 +85,14 @@ class Run:
 
 class Studio:
     def __init__(self, store: StudioStore, llm_factory: Callable[[], LLM], sites_dir: Path, *, debate_rounds: int = 2,
-                 review_threshold: float = 8.0, max_fix_rounds: int = 2, notify: Notify | None = None) -> None:
+                 review_threshold: float = 8.0, max_fix_rounds: int = 2, notify: Notify | None = None,
+                 trusted_chats: Iterable[int] = ()) -> None:
         self.store, self.llm_factory, self.sites_dir = store, llm_factory, sites_dir
         self.debate_rounds, self.review_threshold, self.max_fix_rounds = debate_rounds, review_threshold, max_fix_rounds
         self.notify = notify
+        # Чаты администраторов. Уроки из их проектов (и из веб-панели, chat_id = 0) работают сразу,
+        # уроки из проектов клиентов ждут одобрения: иначе один клиент мог бы через уроки влиять на чужие сайты.
+        self.trusted_chats = frozenset(trusted_chats) | {0}
 
     # ================= общение =================
     async def say(self, run: Run, agent: str, channel: str, kind: str, content: str, data: dict[str, Any] | None = None,
@@ -480,8 +484,8 @@ class Studio:
                 out.append({"agent": check["owner"], "text": f"Сразу проверять: «{check['name']}» — в прошлом проекте это вернули на доработку."})
             if summary.get("fix_rounds"):
                 out.append({"agent": "all", "text": "Спорные решения обсуждать до производства: доработки после ревью обходятся дороже."})
-            if summary.get("revision"):
-                out.append({"agent": "producer", "text": f"Клиенты просят правки вида «{summary['revision'][:120]}» — уточнять это на брифинге."})
+            if summary.get("revision"):              # текст клиента в урок не копируем: уроки видят агенты всех проектов
+                out.append({"agent": "producer", "text": "Клиенты присылают правки после сдачи — подробнее уточнять пожелания на брифинге."})
             return {"message": "Ретро: записала уроки. Что повторялось — закрепляем, что не сработало — меняем." if out
                     else "Ретро: проект прошёл чисто, новых уроков нет — закрепляю текущий подход.", "lessons": out}
         res = await self.ask(run, "curator", "ретро", "Проведи ретроспективу проекта. Итоги:\n" + _short(summary, 3000)
@@ -489,13 +493,19 @@ class Studio:
                              + "\nЗапиши до 5 новых конкретных уроков (agent — кому урок или all). Не повторяй известные.",
                              {"lessons": arr(lesson)}, offline, kind="lesson")
         saved = []
+        trusted = run.project.chat_id in self.trusted_chats
         for item in (res.get("lessons") or [])[:5]:
             if isinstance(item, dict) and (item.get("agent") in BY_ID or item.get("agent") == "all") and str(item.get("text", "")).strip():
-                if await self.store.add_lesson(item["agent"], str(item["text"]), run.project.id):
+                if await self.store.add_lesson(item["agent"], str(item["text"]), run.project.id, approved=trusted):
                     saved.append(f"[{item['agent']}] {item['text']}")
         if saved:
-            await self.store.post(None, "общий", "curator", "lesson", f"Команда усвоила {len(saved)} новых урока(ов) после проекта «{run.project.name}».",
-                                  {"lessons": saved})
+            # Уроки клиентского проекта видны только в его ретро: в общий канал они попадут после одобрения.
+            if trusted:
+                await self.store.post(None, "общий", "curator", "lesson",
+                                      f"Команда усвоила {len(saved)} новых урока(ов) после проекта «{run.project.name}».", {"lessons": saved})
+            else:
+                await self.store.post(run.project.id, "ретро", "curator", "lesson",
+                                      f"Записала {len(saved)} урока(ов) — команда применит их после проверки администратором.", {"lessons": saved})
         return saved
 
     async def _finish(self, run: Run, html: str, avg: float, version: int) -> Project:

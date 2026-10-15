@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS lessons (
     uses        INTEGER NOT NULL DEFAULT 0,
     project_id  INTEGER,                           -- из какого проекта родился урок
     active      INTEGER NOT NULL DEFAULT 1,        -- 0 — урок не подтвердился и больше не подсказывается
+    approved    INTEGER NOT NULL DEFAULT 1,        -- 0 — урок из проекта клиента ждёт проверки администратором
     created_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS lessons_agent ON lessons (agent, active, score);
@@ -128,20 +129,48 @@ def _message(row: sqlite3.Row) -> dict[str, Any]:
             "reply_to": row["reply_to"], "created_at": row["created_at"]}
 
 
+def _insert_project(conn: sqlite3.Connection, brief: dict[str, Any], slug_base: str, chat_id: int) -> Project:
+    slug, n = slug_base, 1
+    while conn.execute("SELECT 1 FROM projects WHERE slug = ?", (slug,)).fetchone():
+        n += 1
+        slug = f"{slug_base}-{n}"
+    now = utc_now()
+    cur = conn.execute("INSERT INTO projects (token, slug, chat_id, brief_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                       (secrets.token_urlsafe(16), slug, chat_id, json.dumps(brief, ensure_ascii=False), now, now))
+    return _project(conn.execute("SELECT * FROM projects WHERE id = ?", (cur.lastrowid,)).fetchone())
+
+
+def _count_lesson(conn: sqlite3.Connection, agent: str) -> None:
+    """Счётчик уроков агента: от него зависит его уровень на странице совета."""
+    if agent != "all":
+        conn.execute("INSERT INTO agent_stats (agent, lessons) VALUES (?, 1) "
+                     "ON CONFLICT (agent) DO UPDATE SET lessons = lessons + 1", (agent,))
+
+
 class StudioStore(SQLiteStore):
     SCHEMA = SCHEMA
 
+    async def init(self) -> None:
+        await super().init()
+
+        def migrate(conn: sqlite3.Connection) -> None:
+            # Базы, созданные до появления модерации уроков: старые уроки считаем одобренными.
+            if "approved" not in {r["name"] for r in conn.execute("PRAGMA table_info(lessons)")}:
+                conn.execute("ALTER TABLE lessons ADD COLUMN approved INTEGER NOT NULL DEFAULT 1")
+        await self._run(migrate)
+
     # ---------- проекты ----------
     async def create_project(self, brief: dict[str, Any], slug_base: str, chat_id: int = 0) -> Project:
-        def work(conn: sqlite3.Connection) -> Project:
-            slug, n = slug_base, 1
-            while conn.execute("SELECT 1 FROM projects WHERE slug = ?", (slug,)).fetchone():
-                n += 1
-                slug = f"{slug_base}-{n}"
-            now = utc_now()
-            cur = conn.execute("INSERT INTO projects (token, slug, chat_id, brief_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-                               (secrets.token_urlsafe(16), slug, chat_id, json.dumps(brief, ensure_ascii=False), now, now))
-            return _project(conn.execute("SELECT * FROM projects WHERE id = ?", (cur.lastrowid,)).fetchone())
+        return await self._run(lambda conn: _insert_project(conn, brief, slug_base, chat_id))
+
+    async def create_within_limit(self, brief: dict[str, Any], slug_base: str, chat_id: int, since: str, limit: int) -> Project | None:
+        """Создаёт проект, только если у чата меньше limit проектов с момента since. None — лимит исчерпан.
+
+        Проверка и запись идут в одной транзакции: два быстрых нажатия «Запустить» лимит не обойдут.
+        """
+        def work(conn: sqlite3.Connection) -> Project | None:
+            used = conn.execute("SELECT COUNT(*) FROM projects WHERE chat_id = ? AND created_at >= ?", (chat_id, since)).fetchone()[0]
+            return _insert_project(conn, brief, slug_base, chat_id) if used < limit else None
         return await self._run(work)
 
     async def get(self, project_id: int) -> Project | None:
@@ -268,7 +297,7 @@ class StudioStore(SQLiteStore):
     async def lessons_for(self, agent: str, limit: int = 5) -> list[dict[str, Any]]:
         """Лучшие активные уроки агента и общие уроки команды."""
         def work(conn: sqlite3.Connection) -> list[dict[str, Any]]:
-            rows = conn.execute("SELECT * FROM lessons WHERE active = 1 AND agent IN (?, 'all') "
+            rows = conn.execute("SELECT * FROM lessons WHERE active = 1 AND approved = 1 AND agent IN (?, 'all') "
                                 "ORDER BY score DESC, id DESC LIMIT ?", (agent, limit))
             return [dict(r) for r in rows]
         return await self._run(work)
@@ -281,22 +310,47 @@ class StudioStore(SQLiteStore):
                     conn.execute("UPDATE lessons SET uses = uses + 1 WHERE id = ?", (lesson_id,))
         await self._run(work)
 
-    async def add_lesson(self, agent: str, text: str, project_id: int | None, score: float = 1.0) -> int | None:
-        """Записывает урок. Дословный повтор не плодит дубль, а укрепляет уже известный урок."""
+    async def add_lesson(self, agent: str, text: str, project_id: int | None, score: float = 1.0,
+                         approved: bool = True) -> int | None:
+        """Записывает урок. Дословный повтор не плодит дубль, а укрепляет уже известный урок.
+
+        approved=False — урок родился из проекта клиента: агентам он не подсказывается, пока его не одобрит
+        администратор (/lessons в боте). Такой повтор не трогает существующие уроки, иначе клиент мог бы
+        оживить выключенный урок.
+        """
         def work(conn: sqlite3.Connection) -> int | None:
             text_clean = " ".join(text.split())[:300]
             if not text_clean:
                 return None
             same = conn.execute("SELECT id FROM lessons WHERE agent = ? AND lower(text) = lower(?)", (agent, text_clean)).fetchone()
             if same:
-                conn.execute("UPDATE lessons SET score = score + 0.5, active = 1 WHERE id = ?", (same["id"],))
+                if approved:
+                    conn.execute("UPDATE lessons SET score = score + 0.5, active = 1 WHERE id = ?", (same["id"],))
                 return int(same["id"])
-            cur = conn.execute("INSERT INTO lessons (agent, text, score, project_id, created_at) VALUES (?, ?, ?, ?, ?)",
-                               (agent, text_clean, score, project_id, utc_now()))
-            if agent != "all":
-                conn.execute("INSERT INTO agent_stats (agent, lessons) VALUES (?, 1) "
-                             "ON CONFLICT (agent) DO UPDATE SET lessons = lessons + 1", (agent,))
+            cur = conn.execute("INSERT INTO lessons (agent, text, score, project_id, approved, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                               (agent, text_clean, score, project_id, int(approved), utc_now()))
+            if approved:
+                _count_lesson(conn, agent)
             return int(cur.lastrowid)
+        return await self._run(work)
+
+    async def unapproved_lessons(self, limit: int = 10) -> list[dict[str, Any]]:
+        def work(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+            return [dict(r) for r in conn.execute("SELECT * FROM lessons WHERE approved = 0 ORDER BY id LIMIT ?", (limit,))]
+        return await self._run(work)
+
+    async def review_lesson(self, lesson_id: int, approve: bool) -> bool:
+        """Решение администратора по уроку из проекта клиента: одобрить или удалить. False — такого урока на проверке нет."""
+        def work(conn: sqlite3.Connection) -> bool:
+            row = conn.execute("SELECT agent FROM lessons WHERE id = ? AND approved = 0", (lesson_id,)).fetchone()
+            if row is None:
+                return False
+            if approve:
+                conn.execute("UPDATE lessons SET approved = 1 WHERE id = ?", (lesson_id,))
+                _count_lesson(conn, row["agent"])
+            else:
+                conn.execute("DELETE FROM lessons WHERE id = ?", (lesson_id,))
+            return True
         return await self._run(work)
 
     async def rate(self, project_id: int, rating: int, agents: list[str]) -> list[dict[str, Any]]:

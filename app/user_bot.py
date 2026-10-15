@@ -20,6 +20,12 @@ from app.studio.worker import site_url, watch_url
 
 LANG_TITLES = {"ru": "🇷🇺 Русский", "uz": "🇺🇿 O‘zbekcha", "en": "🇬🇧 English"}
 MAX_REVISIONS = 10
+LIMIT_TEXT = "На сегодня лимит новых сайтов исчерпан. Попробуйте завтра или внесите правки в готовый — /mysites."
+
+
+def day_ago() -> str:
+    """Начало скользящих суток для дневного лимита сайтов."""
+    return (datetime.now(timezone.utc) - timedelta(days=1)).isoformat(timespec="seconds")
 
 
 class Order(StatesGroup):
@@ -87,6 +93,7 @@ def build_user_router(cfg: Config, *, news: NewsStore | None, store: StudioStore
                       wake_worker: Callable[[], None], wake_news: Callable[[], None]) -> Router:
     router = Router()
     is_admin = lambda chat_id: chat_id in cfg.admin_chat_ids
+    launching: set[int] = set()                      # чаты, чей заказ сайта прямо сейчас запускается
 
     # ---------- новости ----------
     @router.message(Command("news"))
@@ -154,11 +161,10 @@ def build_user_router(cfg: Config, *, news: NewsStore | None, store: StudioStore
         if store is None:
             await message.answer("Студия сайтов сейчас выключена.")
             return
-        if not is_admin(chat_id):
-            since = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat(timespec="seconds")
-            if cfg.studio_daily_limit == 0 or await store.count_since(chat_id, since) >= cfg.studio_daily_limit:
-                await message.answer("На сегодня лимит новых сайтов исчерпан. Попробуйте завтра или внесите правки в готовый — /mysites.")
-                return
+        # Здесь лимит проверяется, чтобы не гонять человека по анкете зря; окончательно — при запуске (confirm).
+        if not is_admin(chat_id) and (cfg.studio_daily_limit == 0 or await store.count_since(chat_id, day_ago()) >= cfg.studio_daily_limit):
+            await message.answer(LIMIT_TEXT)
+            return
         await state.clear()
         await state.set_state(Order.business)
         await message.answer("🎨 Соберём вам сайт! Над ним будут работать 20 ИИ-агентов: стратег, арт-директор, колорист, "
@@ -287,13 +293,25 @@ def build_user_router(cfg: Config, *, news: NewsStore | None, store: StudioStore
         await callback.answer()
         if store is None or not isinstance(callback.message, Message):
             return
-        data = await state.get_data()
-        await state.clear()
-        brief = {"business": data.get("business", ""), "niche": data.get("niche", ""), "description": data.get("description", ""),
-                 "style": data.get("style", ""), "colors": data.get("colors", ""), "lang": data.get("lang", "ru"),
-                 "city": "", "contacts": data.get("contacts") or {}}
         chat_id = callback.message.chat.id
-        project = await store.create_project(brief, slugify(brief["business"]), chat_id=chat_id)
+        if chat_id in launching:                     # повторное нажатие, пока первое ещё обрабатывается
+            return
+        launching.add(chat_id)
+        try:
+            data = await state.get_data()
+            await state.clear()
+            brief = {"business": data.get("business", ""), "niche": data.get("niche", ""), "description": data.get("description", ""),
+                     "style": data.get("style", ""), "colors": data.get("colors", ""), "lang": data.get("lang", "ru"),
+                     "city": "", "contacts": data.get("contacts") or {}}
+            if is_admin(chat_id):
+                project = await store.create_project(brief, slugify(brief["business"]), chat_id=chat_id)
+            else:
+                project = await store.create_within_limit(brief, slugify(brief["business"]), chat_id, day_ago(), cfg.studio_daily_limit)
+        finally:
+            launching.discard(chat_id)
+        if project is None:
+            await callback.message.answer(LIMIT_TEXT)
+            return
         wake_worker()
         watch = watch_url(cfg.public_url, project)
         text = ("🚀 Совет из 20 агентов взялся за ваш сайт. Обычно это занимает 5–15 минут — пришлю ссылку, как будет готово.")
@@ -411,10 +429,34 @@ def build_user_router(cfg: Config, *, news: NewsStore | None, store: StudioStore
     async def lessons(message: Message) -> None:
         if not is_admin(message.chat.id) or store is None:
             return
-        items = [l for l in await store.all_lessons(10) if l["active"]]
-        if not items:
+        items = [l for l in await store.all_lessons(10) if l["active"] and l["approved"]]
+        waiting = await store.unapproved_lessons(10)
+        if not items and not waiting:
             await message.answer("Уроков пока нет: они появятся после первых проектов.")
             return
-        await message.answer("Чему научилась команда:\n\n" + "\n".join(f"• [{l['agent']}] {l['text']} (вес {l['score']:.1f})" for l in items))
+        if items:
+            await message.answer("Чему научилась команда:\n\n" + "\n".join(f"• [{l['agent']}] {l['text']} (вес {l['score']:.1f})" for l in items))
+        for l in waiting:
+            await message.answer(f"Урок из проекта клиента № {l['project_id']} ждёт проверки:\n\n[{l['agent']}] {l['text']}\n\n"
+                                 "Одобренный урок агенты будут учитывать во всех следующих проектах.",
+                                 reply_markup=kb([[("✅ Одобрить", f"lesson:ok:{l['id']}"), ("🗑 Удалить", f"lesson:no:{l['id']}")]]))
+
+    @router.callback_query(F.data.startswith("lesson:"))
+    async def review_lesson(callback: CallbackQuery) -> None:
+        if store is None or not isinstance(callback.message, Message) or not is_admin(callback.message.chat.id):
+            await callback.answer()
+            return
+        try:
+            _, verdict, lesson_id = (callback.data or "").split(":")
+            approve = {"ok": True, "no": False}[verdict]
+            found = await store.review_lesson(int(lesson_id), approve)
+        except (KeyError, ValueError):
+            await callback.answer()
+            return
+        if not found:
+            await callback.answer("Этот урок уже проверен")
+            return
+        await callback.answer("Одобрено" if approve else "Удалено")
+        await callback.message.edit_text(f"{callback.message.text}\n\n{'✅ Одобрено' if approve else '🗑 Удалено'}")
 
     return router

@@ -8,6 +8,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
@@ -20,7 +21,7 @@ from aiohttp.test_utils import TestClient, TestServer
 from app.bot import Notifier, build_dispatcher, order_header, stats_text
 from app.config import Config
 from app.storage import Storage
-from app.web import RateLimiter, create_app, today
+from app.web import RateLimiter, client_ip, create_app, today
 
 PASSWORD = "очень-длинный-пароль-123"
 PAGE = '<!doctype html><html><body><script type="application/json" id="site-data">{}</script><script id="site-js"></script></body></html>'
@@ -170,6 +171,16 @@ class ServerCase(unittest.IsolatedAsyncioTestCase):
         client = await self._client(make_config(self.root, admin_password=""))
         self.assertEqual((await client.post("/api/publish", data=PAGE, headers={"Authorization": "Bearer "})).status, 403)
 
+    def test_client_ip_trusts_only_local_proxy(self) -> None:
+        request = lambda remote, forwarded="": SimpleNamespace(remote=remote, headers={"X-Forwarded-For": forwarded} if forwarded else {})
+        self.assertEqual(client_ip(request("127.0.0.1", "1.1.1.1, 5.6.7.8"), True), "5.6.7.8")   # последний адрес дописал наш прокси
+        self.assertEqual(client_ip(request("203.0.113.9", "5.6.7.8"), True), "203.0.113.9")      # напрямую извне — заголовку не верим
+        self.assertEqual(client_ip(request("127.0.0.1", "5.6.7.8"), False), "127.0.0.1")
+        # IPv6 — одна сеть /64 на клиента: перебор адресов внутри неё лимиты не обходит
+        self.assertEqual(client_ip(request("2001:db8:1:2::1"), True), client_ip(request("2001:db8:1:2:ffff::9"), True))
+        self.assertNotEqual(client_ip(request("2001:db8:1:2::1"), True), client_ip(request("2001:db8:1:3::1"), True))
+        self.assertEqual(client_ip(request("::ffff:5.6.7.8"), True), "5.6.7.8")
+
     def test_rate_limiter_window(self) -> None:
         now = [0.0]
         limiter = RateLimiter(limit=2, window=10, clock=lambda: now[0])
@@ -265,7 +276,9 @@ class ServerCase(unittest.IsolatedAsyncioTestCase):
         await self.client.post("/api/order", json=order_body())                      # дубль заявки счётчик не увеличивает
         totals = await self.storage.totals(today())
         self.assertEqual(totals, {"visit": 3, "brief_start": 1, "brief_done": 1, "order": 1})
-        columns = [row[1] for row in sqlite3.connect(self.cfg.data_dir / "orders.sqlite3").execute("PRAGMA table_info(events)")]
+        conn = sqlite3.connect(self.cfg.data_dir / "orders.sqlite3")
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(events)")]
+        conn.close()                                                                  # иначе Windows не даст удалить папку теста
         self.assertEqual(columns, ["day", "name", "count"])                           # в таблице только день, шаг и число
 
     async def test_funnel_event_rate_limit(self) -> None:
