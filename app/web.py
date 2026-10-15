@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hmac
+import ipaddress
 import json
 import logging
 import os
@@ -110,14 +111,37 @@ def _clean(value: object, limit: int) -> str:
     return " ".join(str(value).split())[:limit] if isinstance(value, (str, int, float)) else ""
 
 
+def _is_loopback(address: str | None) -> bool:
+    try:
+        return ipaddress.ip_address(address or "").is_loopback
+    except ValueError:
+        return False
+
+
+def _rate_key(address: str) -> str:
+    """Ключ для ограничений частоты. IPv6 считаем по сети /64: провайдер выдаёт её целиком одному клиенту,
+    и иначе можно было бы обходить лимиты (и подбирать пароль), просто меняя адрес внутри своей сети."""
+    try:
+        ip = ipaddress.ip_address(address)
+    except ValueError:
+        return address
+    if isinstance(ip, ipaddress.IPv6Address):
+        if ip.ipv4_mapped:                           # ::ffff:1.2.3.4 — это обычный IPv4-клиент
+            return str(ip.ipv4_mapped)
+        return str(ipaddress.ip_network(f"{ip}/64", strict=False))
+    return str(ip)
+
+
 def client_ip(request: web.Request, trust_proxy: bool) -> str:
-    if trust_proxy:
+    """Адрес клиента — ключ для ограничений частоты."""
+    # X-Forwarded-For читаем, только если запрос пришёл от прокси на этой же машине (Caddy или nginx по README).
+    # Иначе, если сервер случайно открыт наружу напрямую, клиент подставил бы любой адрес и обошёл все лимиты.
+    if trust_proxy and _is_loopback(request.remote):
         forwarded = request.headers.get("X-Forwarded-For", "")
         if forwarded:
-            # Берём последний адрес: его дописал наш собственный прокси (Caddy или nginx).
-            # Первые значения в этом заголовке клиент может подделать.
-            return forwarded.split(",")[-1].strip()
-    return request.remote or "unknown"
+            # Берём последний адрес: его дописал наш собственный прокси. Первые значения клиент может подделать.
+            return _rate_key(forwarded.split(",")[-1].strip())
+    return _rate_key(request.remote or "unknown")
 
 
 def _estimate_text(estimate: object) -> str:
@@ -173,6 +197,7 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
         password = unquote(token.strip()) if scheme.lower() == "bearer" else ""
         if not hmac.compare_digest(password.encode("utf-8"), cfg.admin_password.encode("utf-8")):
             auth_fails.hit(ip)
+            log.warning("%s: неверный пароль администратора", request.path)
             return _json_error(401, "Неверный пароль.")
         return None
 
@@ -238,17 +263,11 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
         return web.json_response({"ok": True})
 
     async def publish(request: web.Request) -> web.Response:
-        ip = client_ip(request, cfg.trust_proxy)
         if not cfg.publish_enabled:
             return _json_error(403, "Публикация выключена: не задан ADMIN_PASSWORD.")
-        if auth_fails.blocked(ip):
-            return _json_error(429, "Слишком много попыток. Подождите 15 минут.")
-        scheme, _, token = request.headers.get("Authorization", "").partition(" ")
-        password = unquote(token.strip()) if scheme.lower() == "bearer" else ""
-        if not hmac.compare_digest(password.encode("utf-8"), cfg.admin_password.encode("utf-8")):
-            auth_fails.hit(ip)
-            log.warning("публикация: неверный пароль")
-            return _json_error(401, "Неверный пароль.")
+        denied = await check_admin(request)
+        if denied is not None:
+            return denied
         if (request.content_length or 0) > MAX_PUBLISH_BYTES:
             return _json_error(413, "Страница слишком большая.")
         raw = await _read_limited(request, MAX_PUBLISH_BYTES)

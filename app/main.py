@@ -42,7 +42,7 @@ async def run(cfg: Config) -> None:
         await studio_store.init()
         sites_dir = cfg.data_dir / "sites"
         llm = LLMFactory(model=cfg.studio_model, max_calls=cfg.studio_max_calls, enabled=cfg.claude_enabled)
-        studio = Studio(studio_store, llm, sites_dir, debate_rounds=cfg.debate_rounds)
+        studio = Studio(studio_store, llm, sites_dir, debate_rounds=cfg.debate_rounds, trusted_chats=cfg.admin_chat_ids)
         worker = StudioWorker(studio, studio_store, bot, cfg.public_url, cfg.studio_concurrency)
         studio_ctx = StudioContext(store=studio_store, studio=studio, news=news, sites_dir=sites_dir, wake_worker=worker.wake,
                                    wake_news=broadcaster.wake, claude=cfg.claude_enabled)

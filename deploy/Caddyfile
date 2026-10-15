@@ -2,5 +2,7 @@
 # Замените varaq.uz на свой домен. Файл кладётся в /etc/caddy/Caddyfile
 varaq.uz, www.varaq.uz {
     encode gzip
+    # Браузер год открывает сайт только по HTTPS: подменить первый заход по http:// не получится.
+    header Strict-Transport-Security "max-age=31536000"
     reverse_proxy 127.0.0.1:8080
 }
