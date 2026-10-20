@@ -110,13 +110,13 @@ class NewsCase(TelegramCase):
             await self.news.subscribe(chat)
         await self.news.unsubscribe(40)
         self.telegram.blocked.add(30)
-        news_id = await self.news.add_news("Новая услуга", "Теперь делаем сайты за 3 дня", "https://varaq.uz/news")
+        news_id = await self.news.add_news("Новая услуга", "Теперь делаем сайты за 3 дня", "https://codexlab.uz/news")
         sender = Broadcaster(self.news, self.bot, pause=0)
         self.assertEqual(await sender.deliver_pending(), 2)
         sent = [f["chat_id"] for m, f in self.telegram.calls if m == "sendMessage"]
         self.assertEqual(sorted(sent), ["10", "20", "30"])                      # отписанному 40 не пишем
         self.assertIn("📰 Новая услуга", self.telegram.texts(10)[0])
-        self.assertIn("https://varaq.uz/news", self.telegram.calls[0][1]["reply_markup"])  # кнопка со ссылкой
+        self.assertIn("https://codexlab.uz/news", self.telegram.calls[0][1]["reply_markup"])  # кнопка со ссылкой
         self.assertFalse(await self.news.is_subscribed(30))                    # заблокировал бота — отписан
         item = await self.news.get(news_id)
         self.assertEqual((item.status, item.sent, item.failed), ("done", 2, 1))
@@ -145,9 +145,9 @@ class NewsCase(TelegramCase):
         self.assertFalse(await self.news.is_subscribed(555))
         await dispatcher.feed_update(self.bot, command(3, 555, "/post Взлом\nчужой текст"))   # посторонний не рассылает
         self.assertEqual(await self.news.latest(), [])
-        await dispatcher.feed_update(self.bot, command(4, 111, "/post Мы открылись\nЖдём вас!\nhttps://varaq.uz"))
+        await dispatcher.feed_update(self.bot, command(4, 111, "/post Мы открылись\nЖдём вас!\nhttps://codexlab.uz"))
         latest = await self.news.latest()
-        self.assertEqual((latest[0].title, latest[0].body, latest[0].url), ("Мы открылись", "Ждём вас!", "https://varaq.uz"))
+        self.assertEqual((latest[0].title, latest[0].body, latest[0].url), ("Мы открылись", "Ждём вас!", "https://codexlab.uz"))
         self.assertEqual(woken, [1])
         await dispatcher.feed_update(self.bot, command(5, 555, "/id"))
         self.assertIn("Номер этого чата: 555", self.telegram.texts(555)[-1])

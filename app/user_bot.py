@@ -45,10 +45,6 @@ def kb(rows: list[list[tuple[str, str]]]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=t, callback_data=d) for t, d in row] for row in rows])
 
 
-def welcome_markup() -> InlineKeyboardMarkup:
-    return kb([[("🎨 Создать свой сайт", "site:new")], [("📰 Последние новости", "news:latest"), ("🗂 Мои сайты", "site:mine")]])
-
-
 def style_markup() -> InlineKeyboardMarkup:
     items = [(p["title"], f"style:{key}") for key, p in PRESETS.items()]
     rows = [items[i:i + 2] for i in range(0, len(items), 2)]

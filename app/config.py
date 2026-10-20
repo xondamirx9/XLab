@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 MIN_PASSWORD_LENGTH = 12
+BRAND = "Codex Lab"          # название студии в боте и сообщениях
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -41,7 +42,7 @@ class Config:
     data_dir: Path
     trust_proxy: bool
     # студия white-label сайтов и новости
-    public_url: str = ""                 # адрес сервера снаружи, для ссылок в Telegram: https://varaq.uz
+    public_url: str = ""                 # адрес сервера снаружи, для ссылок в Telegram: https://codexlab.uz
     studio_enabled: bool = True
     claude_enabled: bool = False         # есть ANTHROPIC_API_KEY — агенты думают через Claude, иначе офлайн-режим
     studio_model: str = "claude-opus-5-5"
@@ -96,7 +97,7 @@ class Config:
 
         public_url = env("PUBLIC_URL", "").strip().rstrip("/")
         if public_url and not public_url.startswith(("https://", "http://")):
-            raise ConfigError("PUBLIC_URL должен начинаться с https://, например https://varaq.uz")
+            raise ConfigError("PUBLIC_URL должен начинаться с https://, например https://codexlab.uz")
 
         return cls(
             bot_token=env("BOT_TOKEN", "").strip(),

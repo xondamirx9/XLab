@@ -1,6 +1,6 @@
 # Caddy сам получает и продлевает HTTPS-сертификат.
-# Замените varaq.uz на свой домен. Файл кладётся в /etc/caddy/Caddyfile
-varaq.uz, www.varaq.uz {
+# Замените codexlab.uz на свой домен. Файл кладётся в /etc/caddy/Caddyfile
+codexlab.uz, www.codexlab.uz {
     encode gzip
     # Браузер год открывает сайт только по HTTPS: подменить первый заход по http:// не получится.
     header Strict-Transport-Security "max-age=31536000"
