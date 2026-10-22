@@ -103,7 +103,7 @@ class ServerCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("site-js", await response.text())
         self.assertIn("frame-ancestors 'none'", response.headers["Content-Security-Policy"])
         health = await (await self.client.get("/api/health")).json()
-        self.assertEqual(health, {"app": "varaq-site", "ok": True, "publish": True, "bot": False})
+        self.assertEqual(health, {"app": "codexlab-site", "ok": True, "publish": True, "bot": False})
 
     async def test_unknown_path_is_404_and_no_file_leak(self) -> None:
         for path in ["/data/orders.sqlite3", "/../.env", "/.env", "/site/backups/"]:

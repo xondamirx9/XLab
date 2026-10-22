@@ -19,6 +19,7 @@ from aiohttp import web
 
 from app.config import Config
 from app.news import NewsStore
+from app.rates import RateService
 from app.storage import Storage
 from app.studio.pipeline import Studio
 from app.studio.store import StudioStore
@@ -157,7 +158,8 @@ def _estimate_text(estimate: object) -> str:
 
 
 def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
-               bot_enabled: bool = False, studio: StudioContext | None = None) -> web.Application:
+               bot_enabled: bool = False, studio: StudioContext | None = None,
+               rates: RateService | None = None) -> web.Application:
     order_limit = RateLimiter(limit=5, window=600)        # 5 заявок за 10 минут с одного адреса
     order_total = RateLimiter(limit=120, window=3600)     # и не больше 120 в час со всех адресов
     auth_fails = RateLimiter(limit=5, window=900)         # 5 неверных паролей за 15 минут
@@ -181,10 +183,18 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
         return web.FileResponse(cfg.index_file, headers={"Cache-Control": "no-cache"})
 
     async def health(request: web.Request) -> web.Response:
-        data = {"app": "varaq-site", "ok": True, "publish": cfg.publish_enabled, "bot": bot_enabled}
+        data = {"app": "codexlab-site", "ok": True, "publish": cfg.publish_enabled, "bot": bot_enabled}
         if studio is not None:
             data["studio"] = "claude" if studio.claude else "offline"
         return web.json_response(data, headers={"Cache-Control": "no-store"})
+
+    async def rate(request: web.Request) -> web.Response:
+        """Курс доллара для цен в USD на сайте. Сервер сам ходит на nbu.uz и кеширует ответ."""
+        found = await rates.usd() if rates is not None else None
+        if found is None:
+            return _json_error(503, "Курс сейчас недоступен.")
+        return web.json_response({"ok": True, "usd": round(found.usd, 2), "date": found.date, "source": found.source},
+                                 headers={"Cache-Control": "public, max-age=600"})
 
     async def check_admin(request: web.Request) -> web.Response | None:
         """Пароль администратора для служебного API. None — пускаем."""
@@ -288,6 +298,7 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
     app.router.add_get("/", index)
     app.router.add_get("/index.html", index)
     app.router.add_get("/api/health", health)
+    app.router.add_get("/api/rate", rate)
     app.router.add_post("/api/order", order)
     app.router.add_post("/api/event", event)
     app.router.add_post("/api/publish", publish)

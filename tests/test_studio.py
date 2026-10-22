@@ -365,11 +365,11 @@ class WizardCase(TelegramCase):
         self.assertEqual(woken, [1])
         self.assertIn("взялся за ваш сайт", self.telegram.texts(chat)[-1])
 
-        worker = StudioWorker(studio, store, self.bot, "https://varaq.uz")
+        worker = StudioWorker(studio, store, self.bot, "https://codexlab.uz")
         done = await worker.process(await store.next_job())
         self.assertEqual(done.version, 1)
         final = self.telegram.texts(chat)[-1]
-        self.assertIn("https://varaq.uz/sites/bodom-coffee/", final)
+        self.assertIn("https://codexlab.uz/sites/bodom-coffee/", final)
 
         await dispatcher.feed_update(self.bot, press(10, 999, f"rate:{done.id}:5"))       # чужой проект оценить нельзя
         self.assertEqual((await store.get(done.id)).rating, 0)
