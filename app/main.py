@@ -64,6 +64,8 @@ async def run(cfg: Config) -> None:
         log.warning("ADMIN_CHAT_IDS пуст: напишите боту /start, он покажет номер чата")
     if not cfg.publish_enabled:
         log.warning("ADMIN_PASSWORD не задан: публикация из админки выключена")
+    if cfg.cloud_proxy:
+        log.info("адрес посетителя берём из X-Forwarded-For прокси облачной платформы (TRUST_PROXY=cloud)")
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()

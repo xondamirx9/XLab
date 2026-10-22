@@ -119,6 +119,35 @@ def _is_loopback(address: str | None) -> bool:
         return False
 
 
+# Сети Cloudflare (cloudflare.com/ips): через них идут запросы к облачным платформам вроде Render.
+CLOUDFLARE_NETS = tuple(ipaddress.ip_network(net) for net in (
+    "173.245.48.0/20", "103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22", "141.101.64.0/18", "108.162.192.0/18",
+    "190.93.240.0/20", "188.114.96.0/20", "197.234.240.0/22", "198.41.128.0/17", "162.158.0.0/15", "104.16.0.0/13",
+    "104.24.0.0/14", "172.64.0.0/13", "131.0.72.0/22", "2400:cb00::/32", "2606:4700::/32", "2803:f800::/32",
+    "2405:b500::/32", "2405:8100::/32", "2a06:98c0::/29", "2c0f:f248::/32"))
+# Внутренние сети, из которых балансировщик платформы приходит к приложению. Список явный: ip.is_private
+# считает частными и служебные диапазоны (документационные, тестовые), которые внутренней сетью не являются.
+INTERNAL_NETS = tuple(ipaddress.ip_network(net) for net in (
+    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16",
+    "fc00::/7", "fe80::/10", "::1/128"))
+
+
+def _parse_ip(address: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    try:
+        ip = ipaddress.ip_address(address.strip())
+    except ValueError:
+        return None
+    return ip.ipv4_mapped if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped else ip
+
+
+def _is_internal(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    return any(ip in net for net in INTERNAL_NETS if net.version == ip.version)
+
+
+def _is_platform_proxy(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    return _is_internal(ip) or any(ip in net for net in CLOUDFLARE_NETS if net.version == ip.version)
+
+
 def _rate_key(address: str) -> str:
     """Ключ для ограничений частоты. IPv6 считаем по сети /64: провайдер выдаёт её целиком одному клиенту,
     и иначе можно было бы обходить лимиты (и подбирать пароль), просто меняя адрес внутри своей сети."""
@@ -133,7 +162,7 @@ def _rate_key(address: str) -> str:
     return str(ip)
 
 
-def client_ip(request: web.Request, trust_proxy: bool) -> str:
+def client_ip(request: web.Request, trust_proxy: bool, cloud_proxy: bool = False) -> str:
     """Адрес клиента — ключ для ограничений частоты."""
     # X-Forwarded-For читаем, только если запрос пришёл от прокси на этой же машине (Caddy или nginx по README).
     # Иначе, если сервер случайно открыт наружу напрямую, клиент подставил бы любой адрес и обошёл все лимиты.
@@ -142,6 +171,17 @@ def client_ip(request: web.Request, trust_proxy: bool) -> str:
         if forwarded:
             # Берём последний адрес: его дописал наш собственный прокси. Первые значения клиент может подделать.
             return _rate_key(forwarded.split(",")[-1].strip())
+    remote = _parse_ip(request.remote or "")
+    if cloud_proxy and remote is not None and _is_internal(remote):
+        # Облачная платформа (Render): запрос проходит Cloudflare и балансировщик во внутренней сети, каждый дописывает
+        # адрес в X-Forwarded-For. Присланное самим клиентом остаётся левее, поэтому идём справа налево,
+        # пропускаем адреса прокси, и первый чужой адрес — посетитель.
+        for part in reversed(request.headers.get("X-Forwarded-For", "").split(",")):
+            ip = _parse_ip(part)
+            if ip is None:                           # мусор в заголовке — левее ничему не верим
+                break
+            if not _is_platform_proxy(ip):
+                return _rate_key(str(ip))
     return _rate_key(request.remote or "unknown")
 
 
@@ -198,7 +238,7 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
 
     async def check_admin(request: web.Request) -> web.Response | None:
         """Пароль администратора для служебного API. None — пускаем."""
-        ip = client_ip(request, cfg.trust_proxy)
+        ip = client_ip(request, cfg.trust_proxy, cfg.cloud_proxy)
         if not cfg.publish_enabled:
             return _json_error(403, "Не задан ADMIN_PASSWORD.")
         if auth_fails.blocked(ip):
@@ -212,7 +252,7 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
         return None
 
     async def order(request: web.Request) -> web.Response:
-        ip = client_ip(request, cfg.trust_proxy)
+        ip = client_ip(request, cfg.trust_proxy, cfg.cloud_proxy)
         if order_limit.blocked(ip) or order_total.blocked("all"):
             return _json_error(429, "Слишком много заявок. Попробуйте позже.")
         if (request.content_length or 0) > MAX_ORDER_BYTES:
@@ -257,7 +297,7 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
 
     async def event(request: web.Request) -> web.Response:
         """Счётчик воронки. Хранится только число событий за день: ни адреса, ни устройства не записываются."""
-        ip = client_ip(request, cfg.trust_proxy)
+        ip = client_ip(request, cfg.trust_proxy, cfg.cloud_proxy)
         if event_limit.blocked(ip):
             return _json_error(429, "Слишком много событий.")
         raw = await _read_limited(request, 1024)
@@ -304,7 +344,7 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
     app.router.add_post("/api/publish", publish)
     if studio is not None:
         setup_studio(app, store=studio.store, studio=studio.studio, news=studio.news, sites_dir=studio.sites_dir,
-                     check_admin=check_admin, client_ip=lambda request: client_ip(request, cfg.trust_proxy),
+                     check_admin=check_admin, client_ip=lambda request: client_ip(request, cfg.trust_proxy, cfg.cloud_proxy),
                      limiter=lambda limit, window: RateLimiter(limit, window), wake_worker=studio.wake_worker,
                      wake_news=studio.wake_news)
     return app
