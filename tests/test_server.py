@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
@@ -20,7 +23,7 @@ from aiohttp.test_utils import TestClient, TestServer
 from app.bot import Notifier, build_dispatcher, order_header, stats_text
 from app.config import Config
 from app.storage import Storage
-from app.web import RateLimiter, create_app, today
+from app.web import RateLimiter, client_ip, create_app, today
 
 PASSWORD = "очень-длинный-пароль-123"
 PAGE = '<!doctype html><html><body><script type="application/json" id="site-data">{}</script><script id="site-js"></script></body></html>'
@@ -102,7 +105,7 @@ class ServerCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("site-js", await response.text())
         self.assertIn("frame-ancestors 'none'", response.headers["Content-Security-Policy"])
         health = await (await self.client.get("/api/health")).json()
-        self.assertEqual(health, {"app": "varaq-site", "ok": True, "publish": True, "bot": False})
+        self.assertEqual(health, {"app": "codexlab-site", "ok": True, "publish": True, "bot": False})
 
     async def test_unknown_path_is_404_and_no_file_leak(self) -> None:
         for path in ["/data/orders.sqlite3", "/../.env", "/.env", "/site/backups/"]:
@@ -169,6 +172,39 @@ class ServerCase(unittest.IsolatedAsyncioTestCase):
     async def test_publish_disabled_without_password(self) -> None:
         client = await self._client(make_config(self.root, admin_password=""))
         self.assertEqual((await client.post("/api/publish", data=PAGE, headers={"Authorization": "Bearer "})).status, 403)
+
+    def test_client_ip_trusts_only_local_proxy(self) -> None:
+        request = lambda remote, forwarded="": SimpleNamespace(remote=remote, headers={"X-Forwarded-For": forwarded} if forwarded else {})
+        self.assertEqual(client_ip(request("127.0.0.1", "1.1.1.1, 5.6.7.8"), True), "5.6.7.8")   # последний адрес дописал наш прокси
+        self.assertEqual(client_ip(request("203.0.113.9", "5.6.7.8"), True), "203.0.113.9")      # напрямую извне — заголовку не верим
+        self.assertEqual(client_ip(request("127.0.0.1", "5.6.7.8"), False), "127.0.0.1")
+        # IPv6 — одна сеть /64 на клиента: перебор адресов внутри неё лимиты не обходит
+        self.assertEqual(client_ip(request("2001:db8:1:2::1"), True), client_ip(request("2001:db8:1:2:ffff::9"), True))
+        self.assertNotEqual(client_ip(request("2001:db8:1:2::1"), True), client_ip(request("2001:db8:1:3::1"), True))
+        self.assertEqual(client_ip(request("::ffff:5.6.7.8"), True), "5.6.7.8")
+
+    def test_client_ip_behind_cloud_platform(self) -> None:
+        request = lambda remote, forwarded="": SimpleNamespace(remote=remote, headers={"X-Forwarded-For": forwarded} if forwarded else {})
+        cloud = lambda remote, forwarded="": client_ip(request(remote, forwarded), True, True)
+        self.assertEqual(cloud("10.204.5.7", "203.0.113.5"), "203.0.113.5")
+        self.assertEqual(cloud("10.204.5.7", "203.0.113.5, 162.158.90.1, 10.10.0.4"), "203.0.113.5")      # Cloudflare и балансировщик пропущены
+        self.assertEqual(cloud("10.204.5.7", "198.51.100.77, 203.0.113.5, 172.70.1.2"), "203.0.113.5")    # подделку клиента слева не берём
+        self.assertEqual(cloud("10.204.5.7", "2001:db8:1:2::9, 2606:4700::1"), "2001:db8:1:2::/64")
+        self.assertEqual(cloud("10.204.5.7", "мусор, 203.0.113.5"), "203.0.113.5")
+        self.assertEqual(cloud("10.204.5.7", "203.0.113.5, мусор"), "10.204.5.7")                         # мусор справа — заголовку не верим
+        self.assertEqual(cloud("10.204.5.7"), "10.204.5.7")
+        self.assertEqual(cloud("198.51.100.4", "203.0.113.5"), "198.51.100.4")      # пришёл не из сети платформы — заголовку не верим
+        self.assertEqual(client_ip(request("10.204.5.7", "203.0.113.5"), True), "10.204.5.7")              # режим выключен
+
+    def test_trust_proxy_setting(self) -> None:
+        def load(**env: str) -> Config:
+            with mock.patch.dict(os.environ, env, clear=True), mock.patch("app.config.load_env_file"):
+                return Config.from_env()
+        self.assertEqual((load().trust_proxy, load().cloud_proxy), (True, False))                           # по умолчанию — Caddy или nginx
+        self.assertEqual((load(RENDER="true").trust_proxy, load(RENDER="true").cloud_proxy), (True, True))   # Render узнаём сами
+        self.assertFalse(load(RENDER="true", TRUST_PROXY="1").cloud_proxy)                                   # явная настройка важнее
+        self.assertTrue(load(TRUST_PROXY="cloud").cloud_proxy)
+        self.assertEqual((load(TRUST_PROXY="0").trust_proxy, load(TRUST_PROXY="0").cloud_proxy), (False, False))
 
     def test_rate_limiter_window(self) -> None:
         now = [0.0]
@@ -265,7 +301,9 @@ class ServerCase(unittest.IsolatedAsyncioTestCase):
         await self.client.post("/api/order", json=order_body())                      # дубль заявки счётчик не увеличивает
         totals = await self.storage.totals(today())
         self.assertEqual(totals, {"visit": 3, "brief_start": 1, "brief_done": 1, "order": 1})
-        columns = [row[1] for row in sqlite3.connect(self.cfg.data_dir / "orders.sqlite3").execute("PRAGMA table_info(events)")]
+        conn = sqlite3.connect(self.cfg.data_dir / "orders.sqlite3")
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(events)")]
+        conn.close()                                                                  # иначе Windows не даст удалить папку теста
         self.assertEqual(columns, ["day", "name", "count"])                           # в таблице только день, шаг и число
 
     async def test_funnel_event_rate_limit(self) -> None:

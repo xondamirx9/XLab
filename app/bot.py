@@ -12,14 +12,14 @@ from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, Message
 
+from app.brief_bot import ChatPrefs, SitePricing, build_brief_router, main_menu, welcome_text
 from app.config import Config
 from app.news import NewsStore
+from app.rates import RateService
 from app.storage import Order, Storage
 from app.studio.pipeline import Studio
 from app.studio.store import StudioStore
-from app.user_bot import build_user_router, welcome_markup
-
-BRAND = "Varaq"
+from app.user_bot import build_user_router
 
 log = logging.getLogger("site.bot")
 
@@ -120,9 +120,12 @@ class Notifier:
 
 def build_dispatcher(cfg: Config, storage: Storage, *, news: NewsStore | None = None, studio_store: StudioStore | None = None,
                      studio: Studio | None = None, wake_news: Callable[[], None] = lambda: None,
-                     wake_worker: Callable[[], None] = lambda: None) -> Dispatcher:
+                     wake_worker: Callable[[], None] = lambda: None, rates: RateService | None = None,
+                     wake_orders: Callable[[], None] = lambda: None) -> Dispatcher:
     router = Router()
     is_admin = lambda message: message.chat.id in cfg.admin_chat_ids
+    prefs = ChatPrefs()                       # язык и валюта, которые выбрал человек
+    has_studio = studio_store is not None
 
     @router.message(CommandStart())
     async def start(message: Message, state: FSMContext) -> None:
@@ -132,17 +135,14 @@ def build_dispatcher(cfg: Config, storage: Storage, *, news: NewsStore | None = 
                 "Здравствуйте! Заявки с сайта приходят в этот чат.\n\n"
                 "/last — последние пять заявок\n/stats — воронка сайта за 7 и 30 дней\n/forget 12 — удалить заявку № 12 вместе с контактами клиента\n"
                 "/post Заголовок + текст — разослать новость подписчикам\n/subscribers — сколько подписчиков\n"
-                "/studio — проекты студии сайтов\n/lessons — чему научились агенты\n/site — создать сайт (без лимита)"
+                "/studio — проекты студии сайтов\n/lessons — чему научились агенты\n/site — создать сайт (без лимита)\n"
+                "/prices — тарифы, /brief — конструктор ТЗ: так их видят клиенты"
             )
         elif news is not None:
             await news.subscribe(message.chat.id, message.from_user.full_name if message.from_user else "")
-            await message.answer(
-                f"Здравствуйте! Это бот студии {BRAND}.\n\n"
-                "🔔 Вы подписаны на наши новости — отписаться можно командой /stop.\n"
-                "🎨 А ещё здесь можно получить свой сайт: 20 ИИ-агентов соберут его под ваш стиль, поспорят о концепции "
-                "и проверят друг друга. Начать — кнопкой ниже или командой /site.",
-                reply_markup=welcome_markup(),
-            )
+            lang = prefs.lang(message.chat.id, message.from_user)
+            await message.answer(welcome_text(lang, studio=has_studio, news=True),
+                                 reply_markup=main_menu(lang, studio=has_studio, news=True))
         else:
             await message.answer(
                 f"Здравствуйте! Это служебный бот сайта.\n\nНомер этого чата: {message.chat.id}\n"
@@ -189,6 +189,9 @@ def build_dispatcher(cfg: Config, storage: Storage, *, news: NewsStore | None = 
 
     dispatcher = Dispatcher()
     dispatcher.include_router(router)
+    # Тарифы и конструктор ТЗ — раньше студии: их состояния и /cancel должны срабатывать первыми
+    dispatcher.include_router(build_brief_router(cfg.admin_chat_ids, storage, SitePricing(cfg.index_file), prefs, rates=rates,
+                                                 wake_orders=wake_orders, studio=has_studio, news=news is not None))
     if news is not None or studio_store is not None:
         dispatcher.include_router(build_user_router(cfg, news=news, store=studio_store, studio=studio,
                                                     wake_worker=wake_worker, wake_news=wake_news))

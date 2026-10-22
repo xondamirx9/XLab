@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 MIN_PASSWORD_LENGTH = 12
+BRAND = "Codex Lab"          # название студии в боте и сообщениях
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -40,8 +41,9 @@ class Config:
     site_dir: Path
     data_dir: Path
     trust_proxy: bool
+    cloud_proxy: bool = False            # за прокси облачной платформы (Render): адрес посетителя — из X-Forwarded-For
     # студия white-label сайтов и новости
-    public_url: str = ""                 # адрес сервера снаружи, для ссылок в Telegram: https://varaq.uz
+    public_url: str = ""                 # адрес сервера снаружи, для ссылок в Telegram: https://codexlab.uz
     studio_enabled: bool = True
     claude_enabled: bool = False         # есть ANTHROPIC_API_KEY — агенты думают через Claude, иначе офлайн-режим
     studio_model: str = "claude-opus-5-5"
@@ -94,9 +96,14 @@ class Config:
                 raise ConfigError(f"{key} должен быть от {low} до {high}.")
             return value
 
+        # TRUST_PROXY: 1 — прокси на этой же машине (Caddy, nginx), cloud — прокси облачной платформы, 0 — без прокси.
+        # Не задан и сервер на Render (Render сам выставляет RENDER) — значит, облачная платформа.
+        proxy = env("TRUST_PROXY")
+        proxy = (proxy if proxy is not None else ("cloud" if env("RENDER", "").strip() else "1")).strip().lower()
+
         public_url = env("PUBLIC_URL", "").strip().rstrip("/")
         if public_url and not public_url.startswith(("https://", "http://")):
-            raise ConfigError("PUBLIC_URL должен начинаться с https://, например https://varaq.uz")
+            raise ConfigError("PUBLIC_URL должен начинаться с https://, например https://codexlab.uz")
 
         return cls(
             bot_token=env("BOT_TOKEN", "").strip(),
@@ -106,7 +113,8 @@ class Config:
             port=port,
             site_dir=_path(env("SITE_DIR", ""), "site"),
             data_dir=_path(env("DATA_DIR", ""), "data"),
-            trust_proxy=env("TRUST_PROXY", "1").strip() not in ("0", "false", "no", ""),
+            trust_proxy=proxy not in ("0", "false", "no", ""),
+            cloud_proxy=proxy == "cloud",
             public_url=public_url,
             studio_enabled=env("STUDIO_ENABLED", "1").strip() not in ("0", "false", "no"),
             claude_enabled=bool(env("ANTHROPIC_API_KEY", "").strip()) and env("STUDIO_OFFLINE", "0").strip() in ("0", ""),
