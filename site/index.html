@@ -425,9 +425,8 @@ textarea.in{min-height:96px;resize:vertical}
   .sec,.brief{padding:64px 0}
   .sec-head{margin-bottom:32px}
   .lead{font-size:17px}
-  .hero .chips{flex-wrap:nowrap;overflow-x:auto;margin:0 -16px;padding:2px 16px 8px;scrollbar-width:none}
-  .hero .chips::-webkit-scrollbar{display:none}
-  .hero .chip{flex:none}
+  .hero .chips{gap:8px}
+  .hero .chip{padding:9px 14px;font-size:14px}
   .scene{height:auto;padding-top:330px}
   .stack-wrap{--s:.62;left:55%;top:214px}
   .tag{font-size:13px;padding:5px 12px 5px 5px;transform:translate(-22%,-50%) scale(calc(1 / var(--s,1)))}
@@ -438,8 +437,10 @@ textarea.in{min-height:96px;resize:vertical}
   .panel{padding:22px 16px;border-radius:22px}
   .sheet{padding:24px 20px}
   .opts--cards,.opts--list,.two{grid-template-columns:1fr}
-  .phone{width:112px;border-width:5px;border-radius:20px;right:-4px}
-  .stage-acts{padding-right:0;margin-top:56px}
+  .stage{display:grid;padding-bottom:0}
+  .stage>.browser{grid-area:1/1}
+  .phone{position:relative;grid-area:1/1;justify-self:end;align-self:end;right:auto;bottom:auto;margin:0 -4px -34px 0;width:112px;border-width:5px;border-radius:20px}
+  .stage-acts{padding-right:0;margin-top:54px}
   .demo-head{flex-wrap:wrap}
   .nav-btns{width:100%}
   .nav-btns .btn{flex:1}
@@ -1034,6 +1035,22 @@ select.a-in{appearance:auto}
   .top .logo span{display:none}
   .pick--cur .pick-btn .ic{display:none}
 }
+/* Сцена первого экрана. В один столбец (до 980px) при прокрутке слои раздвигаются вверх, к кнопкам, —
+   сцена опускается на столько же и их не задевает. От 981 до 1180px бирки слоёв не заходят на текст слева. */
+@media (max-width:980px){
+  .stack{transform:translateY(calc(var(--spread,0)*80px)) rotateX(calc(56deg + var(--rx,0deg))) rotateZ(calc(-34deg + var(--rz,0deg) + var(--spread,0)*-7deg))}
+}
+@media (min-width:641px) and (max-width:980px){
+  .scene{height:544px}
+  .stack-wrap{top:341px}
+}
+@media (min-width:981px) and (max-width:1180px){
+  .stack-wrap{--s:.9;left:50%}
+}
+/* Зазор над плавающей шапкой при прокрутке закрашен фоном блока под ней (--top-shade ставит скрипт):
+   текст страницы не просвечивает над шапкой */
+.top::before{content:"";position:absolute;left:0;right:0;top:calc(-1 * env(safe-area-inset-top,0px));height:calc(env(safe-area-inset-top,0px) + 34px);background:linear-gradient(180deg,var(--top-shade,transparent) 50%,transparent);opacity:0;transition:opacity .25s ease;pointer-events:none}
+.top.is-scrolled::before{opacity:1}
 /* Плитка «Три языка»: RU / UZ / EN в одну строку и на планшете */
 .tile-big{white-space:nowrap}
 @media (min-width:641px) and (max-width:1180px){.tile-big{font-size:34px}}
@@ -3886,6 +3903,18 @@ let canAdmin = false, canEditKnown = false;
 let revealer = null;
 const calm = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 let introPlayed = false, scrollQueued = false;
+/* Фон блока, который сейчас у верхнего края экрана: им закрашен зазор над плавающей шапкой. */
+function shadeUnder() {
+  const page = getComputedStyle(document.body).backgroundColor;
+  for (const block of document.querySelectorAll('#site main > section, #site footer')) {
+    const r = block.getBoundingClientRect();
+    if (r.top <= 6 && r.bottom > 6) {
+      const c = getComputedStyle(block).backgroundColor;
+      return c === 'transparent' || c === 'rgba(0, 0, 0, 0)' ? page : c;
+    }
+  }
+  return page;
+}
 /* Всё, что зависит от прокрутки, считается за один кадр. */
 function applyScroll() {
   scrollQueued = false;
@@ -3893,6 +3922,7 @@ function applyScroll() {
   const bar = $('#topbar');
   if (!bar) return;
   bar.classList.toggle('is-scrolled', y > 12);
+  if (y > 12) bar.style.setProperty('--top-shade', shadeUnder());
   const max = document.documentElement.scrollHeight - vh;
   bar.style.setProperty('--sp', max > 0 ? Math.min(1, y / max).toFixed(4) : '0');
   if (calm()) return;
