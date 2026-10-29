@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
@@ -180,6 +182,29 @@ class ServerCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client_ip(request("2001:db8:1:2::1"), True), client_ip(request("2001:db8:1:2:ffff::9"), True))
         self.assertNotEqual(client_ip(request("2001:db8:1:2::1"), True), client_ip(request("2001:db8:1:3::1"), True))
         self.assertEqual(client_ip(request("::ffff:5.6.7.8"), True), "5.6.7.8")
+
+    def test_client_ip_behind_cloud_platform(self) -> None:
+        request = lambda remote, forwarded="": SimpleNamespace(remote=remote, headers={"X-Forwarded-For": forwarded} if forwarded else {})
+        cloud = lambda remote, forwarded="": client_ip(request(remote, forwarded), True, True)
+        self.assertEqual(cloud("10.204.5.7", "203.0.113.5"), "203.0.113.5")
+        self.assertEqual(cloud("10.204.5.7", "203.0.113.5, 162.158.90.1, 10.10.0.4"), "203.0.113.5")      # Cloudflare и балансировщик пропущены
+        self.assertEqual(cloud("10.204.5.7", "198.51.100.77, 203.0.113.5, 172.70.1.2"), "203.0.113.5")    # подделку клиента слева не берём
+        self.assertEqual(cloud("10.204.5.7", "2001:db8:1:2::9, 2606:4700::1"), "2001:db8:1:2::/64")
+        self.assertEqual(cloud("10.204.5.7", "мусор, 203.0.113.5"), "203.0.113.5")
+        self.assertEqual(cloud("10.204.5.7", "203.0.113.5, мусор"), "10.204.5.7")                         # мусор справа — заголовку не верим
+        self.assertEqual(cloud("10.204.5.7"), "10.204.5.7")
+        self.assertEqual(cloud("198.51.100.4", "203.0.113.5"), "198.51.100.4")      # пришёл не из сети платформы — заголовку не верим
+        self.assertEqual(client_ip(request("10.204.5.7", "203.0.113.5"), True), "10.204.5.7")              # режим выключен
+
+    def test_trust_proxy_setting(self) -> None:
+        def load(**env: str) -> Config:
+            with mock.patch.dict(os.environ, env, clear=True), mock.patch("app.config.load_env_file"):
+                return Config.from_env()
+        self.assertEqual((load().trust_proxy, load().cloud_proxy), (True, False))                           # по умолчанию — Caddy или nginx
+        self.assertEqual((load(RENDER="true").trust_proxy, load(RENDER="true").cloud_proxy), (True, True))   # Render узнаём сами
+        self.assertFalse(load(RENDER="true", TRUST_PROXY="1").cloud_proxy)                                   # явная настройка важнее
+        self.assertTrue(load(TRUST_PROXY="cloud").cloud_proxy)
+        self.assertEqual((load(TRUST_PROXY="0").trust_proxy, load(TRUST_PROXY="0").cloud_proxy), (False, False))
 
     def test_rate_limiter_window(self) -> None:
         now = [0.0]
