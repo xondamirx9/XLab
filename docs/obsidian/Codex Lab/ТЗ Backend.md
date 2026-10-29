@@ -65,7 +65,7 @@ project: "[[00 Обзор проекта]]"
    - строки `/studio`, `/lessons`, `/site` из приветствия админа (`app/bot.py`, обработчик `/start`).
    - В `app/user_bot.py` остаются только новости; файл переименовать в `app/news_bot.py`.
 4. **Сервер** — удалить `app/studio/` целиком, `tests/test_studio.py`, `StudioContext` в `app/web.py`, создание студии и `StudioWorker` в `app/main.py`; маршруты `/sites/*`, `/api/sites/*/lead`, `/council`, `/studio/p/*`, `/api/council/*`, `/api/studio/*`.
-5. **Новости отдельно от студии.** `GET /api/news` и `POST /api/news` сейчас регистрируются внутри `setup_studio` (`app/web.py:305`) и пропадают вместе со студией. Перенести их в `app/web.py` (или `app/news_web.py`), проверка доступа — через BE-02.
+5. **Новости отдельно от студии.** `GET /api/news` и `POST /api/news` сейчас регистрируются внутри `setup_studio` (`app/web.py:345`) и пропадают вместе со студией. Перенести их в `app/web.py` (или `app/news_web.py`), проверка доступа — через BE-02.
 6. Старые адреса `/sites/...` и `/studio/p/...` отвечают **410 Gone** 6 месяцев — поисковики быстрее уберут их из выдачи.
 7. Удалить настройки `STUDIO_*`, `ANTHROPIC_API_KEY`, `PUBLIC_URL` (используется только студией) из `app/config.py`, `.env.example`, README; зависимость `anthropic` — из `requirements.txt`; картинки `docs/council.png`, `docs/presets.png` и разделы README про агентов.
 8. Поле `"studio"` убрать из ответа `/api/health`.
