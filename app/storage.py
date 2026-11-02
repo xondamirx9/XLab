@@ -104,6 +104,13 @@ class Storage(SQLiteStore):
             return conn.execute("DELETE FROM orders WHERE number = ?", (number,)).rowcount > 0
         return await self._run(work)
 
+    async def purge_older(self, cutoff: str) -> int:
+        """Удаляет заявки, полученные раньше cutoff (время UTC в формате ISO, как в created_at).
+        Так выполняется срок хранения из политики конфиденциальности. Возвращает число удалённых."""
+        def work(conn: sqlite3.Connection) -> int:
+            return conn.execute("DELETE FROM orders WHERE created_at < ?", (cutoff,)).rowcount
+        return await self._run(work)
+
     async def bump(self, name: str, day: str) -> None:
         """Прибавляет единицу к счётчику шага воронки за день."""
         def work(conn: sqlite3.Connection) -> None:

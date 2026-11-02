@@ -224,6 +224,21 @@ class ServerCase(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(bot.session.close)
         return bot
 
+    async def test_old_orders_are_purged(self) -> None:
+        await self.client.post("/api/order", json=order_body("order-old1"))
+        await self.client.post("/api/order", json=order_body("order-new1"))
+        conn = sqlite3.connect(self.cfg.data_dir / "orders.sqlite3")             # первая заявка — давняя
+        try:
+            with conn:
+                conn.execute("UPDATE orders SET created_at = '2020-01-01T00:00:00+00:00' WHERE number = 1")
+        finally:
+            conn.close()
+        self.assertEqual(await Notifier(make_config(self.root, order_retention_days=0), self.storage, None).purge_expired(), 0)
+        self.assertIsNotNone(await self.storage.get(1))                              # срок 0 — ничего не удаляем
+        self.assertEqual(await Notifier(self.cfg, self.storage, None).purge_expired(), 1)
+        self.assertIsNone(await self.storage.get(1))                                 # старая удалена
+        self.assertIsNotNone(await self.storage.get(2))                              # свежая на месте
+
     async def test_notifier_delivers_and_retries(self) -> None:
         telegram = FakeTelegram()
         bot = await self._bot(telegram)
