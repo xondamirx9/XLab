@@ -31,6 +31,7 @@ MAX_ORDER_BYTES = 64 * 1024
 MAX_PUBLISH_BYTES = 12 * 1024 * 1024
 MAX_TEXT_CHARS = 20_000
 KEEP_BACKUPS = 20
+BRAND_FILE = re.compile(r"[a-z0-9-]{1,40}\.(png|svg|ico)")    # файлы site/brand, которые сервер отдаёт как есть
 PROJECTS = {"landing": "Лендинг", "corp": "Сайт компании", "shop": "Интернет-магазин",
             "app": "Веб-сервис с кабинетом", "bot": "Telegram-бот"}
 CLIENT_ID = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
@@ -222,6 +223,14 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
             return web.Response(status=503, text="Сайт ещё не загружен: положите index.html в папку site.")
         return web.FileResponse(cfg.index_file, headers={"Cache-Control": "no-cache"})
 
+    async def brand(request: web.Request) -> web.StreamResponse:
+        """Логотипы, значки и картинка-превью из site/brand: только плоские имена png/svg/ico, без подпапок."""
+        name = request.match_info.get("name", "favicon.ico")
+        path = cfg.site_dir / "brand" / name
+        if not BRAND_FILE.fullmatch(name) or not path.is_file():
+            raise web.HTTPNotFound()
+        return web.FileResponse(path, headers={"Cache-Control": "public, max-age=86400"})
+
     async def health(request: web.Request) -> web.Response:
         data = {"app": "codexlab-site", "ok": True, "publish": cfg.publish_enabled, "bot": bot_enabled}
         if studio is not None:
@@ -337,6 +346,8 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
     app = web.Application(middlewares=[headers], client_max_size=MAX_PUBLISH_BYTES + 1024)
     app.router.add_get("/", index)
     app.router.add_get("/index.html", index)
+    app.router.add_get("/brand/{name}", brand)
+    app.router.add_get("/favicon.ico", brand)
     app.router.add_get("/api/health", health)
     app.router.add_get("/api/rate", rate)
     app.router.add_post("/api/order", order)
