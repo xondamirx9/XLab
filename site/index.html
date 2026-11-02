@@ -1098,10 +1098,24 @@ select.a-in{appearance:auto}
 .chip--more{text-decoration:none;color:var(--brand-text);border-style:dashed}
 .chip--more .chip-arrow{width:15px;height:15px;transform:rotate(-90deg)}
 
-/* Фон блоков: слой под содержимым каждого блока, кроме первого экрана; холст «прилипает» к экрану */
+/* Фон сайта. Блоки прозрачные над общим цветом страницы, и под ними один холст во весь экран
+   (.bg-fx--page) — стыков между блоками нет, первый экран тоже на нём. Блоку со своим цветом
+   (ночные полосы днём) — свой холст, который «прилипает» к экрану внутри блока. С анимированным
+   фоном у первого экрана нет своих неподвижных точек и красного свечения: их заменяет холст */
 .sec,.foot{position:relative;isolation:isolate}
 .bg-fx{position:absolute;inset:0;z-index:-1;overflow:hidden;overflow:clip;pointer-events:none}
 .bg-fx canvas{position:sticky;top:0;display:block;width:100%;height:100vh}
+.bg-fx--page{position:fixed}
+.bg-fx--page canvas{position:static;height:100%}
+.bg-on .hero::before,.bg-on .hero::after{display:none}
+:root[data-theme="dark"] body{background:var(--night)}
+:root[data-theme="dark"] :is(.hero,.sec,.brief,.foot){background:transparent}
+:root[data-theme="dark"] :is(.sec--night,.brief)::before,:root[data-theme="dark"] .brief::after{display:none}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme]) body{background:var(--night)}
+  :root:not([data-theme]) :is(.hero,.sec,.brief,.foot){background:transparent}
+  :root:not([data-theme]) :is(.sec--night,.brief)::before,:root:not([data-theme]) .brief::after{display:none}
+}
 
 /* =====================================================================
    СВЕТЛАЯ ТЕМА. Шапка, первый экран и подвал — светлые; примеры, конструктор
@@ -1130,10 +1144,15 @@ select.a-in{appearance:auto}
 :root[data-theme="light"] .hero .chip[aria-pressed="true"]{background:var(--brand);border-color:var(--brand);box-shadow:0 10px 26px -12px var(--brand)}
 :root[data-theme="light"] .layer--shadow{background:rgba(200,20,31,.2)}
 :root[data-theme="light"] .hud-read{color:#0E7490}
+:root[data-theme="light"] .hero-card{color:var(--on-night)}   /* карточка ассистента — тёмное стекло и днём */
 :root[data-theme="light"] .scene::before,:root[data-theme="light"] .scene::after{border-color:var(--brand)}
 
 /* Подвал днём */
 :root[data-theme="light"] .foot{background:#F4F4F6;color:#5E5E68;border-top:1px solid #E4E4EA}
+/* Днём светлые блоки, первый экран и подвал — один белый лист без стыков; примеры и конструктор
+   остаются ночными полосами */
+:root[data-theme="light"] :is(.hero,.sec:not(.sec--night),.foot){background:transparent}
+:root[data-theme="light"] .foot{border-top:0}
 :root[data-theme="light"] .foot a{color:#15151A}
 :root[data-theme="light"]{--fw-ink:#15151A;--fw-red:#B3121B;--fw-top:.1;--fw-bottom:.015}
 
@@ -4399,12 +4418,14 @@ function shadeUnder() {
   return page;
 }
 /* =====================================================================
-   Фон блоков (кроме первого экрана): точечная матрица, цифровой дождь,
-   строки кода или сканер, с красным и синим пятном. Вид — в админке.
-   Холст размером с экран «прилипает» внутри блока (position: sticky),
-   а узор рисуется в координатах блока и едет вместе с ним: длинный блок
-   не создаёт огромный холст. Рисуем только видимые блоки; при «меньше
-   движения» — один неподвижный кадр.
+   Фон сайта: точечная матрица, цифровой дождь, строки кода или сканер,
+   с красным и синим пятном. Вид — в админке. Под прозрачными блоками —
+   один холст во весь экран; у блока со своим цветом (ночные полосы
+   днём) — свой холст размером с экран, он «прилипает» внутри блока
+   (position: sticky). Рисуется всё в общих координатах: пятна, дождь и
+   луч сканера — в координатах экрана, сетка точек и строки — в
+   координатах страницы, часы у всех холстов одни. Рисуем только видимую
+   часть; при «меньше движения» — один неподвижный кадр.
    ===================================================================== */
 const BG_GLYPHS = '01<>/{}[]=;:+*#$codexlab0123456789ABCDEF'.split('');
 const BG_CODE = ['<section class="hero" id="top">', 'const est = estimate(brief, pricing);', 'if (kind === "mobile") steps.skip("domain");',
@@ -4412,7 +4433,7 @@ const BG_CODE = ['<section class="hero" id="top">', 'const est = estimate(brief,
   'return `${lo}–${hi} млн сум`;', 'theme = matchMedia("(prefers-color-scheme: dark)")', '<a class="btn" href="#brief">Составить ТЗ</a>',
   'for (const f of features) total += f.price;', 'deploy → main ✓'];
 const bgHash = (a, b) => { let h = (a * 374761393 + b * 668265263) | 0; h = (h ^ (h >>> 13)) * 1274126177; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
-let bgKind = 'none', bgBands = [], bgSeen = null, bgSize = null, bgRunning = false;
+let bgKind = 'none', bgBands = [], bgSeen = null, bgSize = null, bgRunning = false, bgT = 2000;
 function bgPalette(el) {
   // тёмный блок или светлый — по его собственному фону (ночные полосы тёмные и в светлой теме)
   let c = getComputedStyle(el).backgroundColor;
@@ -4422,12 +4443,13 @@ function bgPalette(el) {
   return dark ? { dark, red: '255,70,80', blue: '96,140,255', dim: '244,241,234', blob: 0.3, glyph: 1 }
               : { dark, red: '200,20,31', blue: '47,91,255', dim: '21,21,26', blob: 0.12, glyph: 0.55 };
 }
-/* Узоры. off — где верх холста внутри блока; w, h — размер холста; t — время, мс. */
+/* Узоры. off — где верх холста на странице; w — ширина холста; t — время, мс;
+   v.ya…v.yb — видимая полоса холста, v.top — где верх холста на экране, v.H — высота экрана. */
 const BG_FX = {
-  dots(ctx, P, w, h, off, t, near) {
-    const step = 24, y0 = Math.floor(off / step) * step + step / 2;
+  dots(ctx, P, w, off, t, near, v) {
+    const step = 24;
     ctx.font = '600 12px ui-monospace,Menlo,Consolas,monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    for (let sy = y0; sy < off + h + step; sy += step) {
+    for (let sy = Math.floor((off + v.ya) / step) * step - step / 2; sy < off + v.yb + step; sy += step) {
       for (let x = step / 2; x < w; x += step) {
         const ix = Math.round(x / step), iy = Math.round(sy / step), y = sy - off;
         const wave = 0.5 + 0.5 * Math.sin(x * 0.012 + sy * 0.018 - t * 0.0016);
@@ -4445,31 +4467,31 @@ const BG_FX = {
     }
     ctx.textAlign = 'start';
   },
-  rain(ctx, P, w, h, off, t, near) {
+  rain(ctx, P, w, off, t, near, v) {
     const size = 16, colW = size + 4, speed = 0.07;
     ctx.font = `500 ${size}px ui-monospace,Menlo,Consolas,monospace`; ctx.textBaseline = 'top';
     for (let i = 0, x = 4; x < w; i++, x += colW) {
-      const r1 = bgHash(i, 7), len = 14 + (r1 * 18 | 0), v = speed * (0.6 + bgHash(i, 3) * 1.4);
-      const span = h + len * size + 200, head = ((t * v + bgHash(i, 5) * span) % span) - 100;
+      const r1 = bgHash(i, 7), len = 14 + (r1 * 18 | 0), sp = speed * (0.6 + bgHash(i, 3) * 1.4);
+      const span = v.H + len * size + 200, head = ((t * sp + bgHash(i, 5) * span) % span) - 100 - v.top;   // струя падает по экрану
       const rgb = near(x, head);
       for (let k = 0; k < len; k++) {
         const y = head - k * size;
-        if (y < -size || y > h) continue;
+        if (y < v.ya - size || y > v.yb) continue;
         const a = (k === 0 ? 0.9 : 0.55 * (1 - k / len)) * P.glyph * (P.dark ? 0.55 : 0.75);
         ctx.fillStyle = k === 0 ? `rgba(${P.dim},${a})` : `rgba(${rgb},${a})`;
         ctx.fillText(BG_GLYPHS[(bgHash(i * 31 + k, Math.floor(t / 400) + k) * BG_GLYPHS.length) | 0], x, y);
       }
     }
   },
-  code(ctx, P, w, h, off, t, near) {
+  code(ctx, P, w, off, t, near, v) {
     const gap = 30;
     ctx.font = '500 13px ui-monospace,Menlo,Consolas,monospace'; ctx.textBaseline = 'middle';
     const cw = ctx.measureText('M').width;
-    for (let sy = Math.floor(off / gap) * gap + 18; sy < off + h + gap; sy += gap) {
+    for (let sy = Math.floor((off + v.ya) / gap) * gap + 18 - gap; sy < off + v.yb + gap; sy += gap) {
       const i = Math.round(sy / gap), y = sy - off;
-      const line = Array.from({ length: 6 }, (_, k) => BG_CODE[(i * 5 + k * 7) % BG_CODE.length]).join('     ');
-      const span = line.length * cw, dir = i % 2 ? -1 : 1, v = 0.006 + bgHash(i, 11) * 0.012;
-      let x = ((dir * v * t + bgHash(i, 13) * span) % span + span) % span - span;
+      const line = Array.from({ length: 6 }, (_, k) => BG_CODE[(((i * 5 + k * 7) % BG_CODE.length) + BG_CODE.length) % BG_CODE.length]).join('     ');
+      const span = line.length * cw, dir = i % 2 ? -1 : 1, sp = 0.006 + bgHash(i, 11) * 0.012;
+      let x = ((dir * sp * t + bgHash(i, 13) * span) % span + span) % span - span;
       ctx.fillStyle = `rgba(${P.dim},${P.dark ? 0.09 : 0.1})`;
       for (let xx = x; xx < w; xx += span) ctx.fillText(line, xx, y);
       const i0 = Math.floor((t * 0.012 + bgHash(i, 17) * line.length) % line.length), frag = line.slice(i0, i0 + 6);
@@ -4480,10 +4502,10 @@ const BG_FX = {
       }
     }
   },
-  scan(ctx, P, w, h, off, t, near) {
-    const step = 20, period = 7000, sy = ((t % period) / period) * (h + 300) - 150;
+  scan(ctx, P, w, off, t, near, v) {
+    const step = 20, period = 7000, sy = ((t % period) / period) * (v.H + 300) - 150 - v.top;   // луч идёт по экрану
     ctx.font = '500 13px ui-monospace,Menlo,Consolas,monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    for (let gy = Math.floor(off / step) * step + step / 2; gy < off + h + step; gy += step) {
+    for (let gy = Math.floor((off + v.ya) / step) * step - step / 2; gy < off + v.yb + step; gy += step) {
       const y = gy - off, d = (y - sy) / 70, a = Math.exp(-d * d) * (d < 0 ? 1 : 0.35);   // за лучом символы гаснут быстрее
       if (a < 0.02) continue;
       for (let x = step / 2; x < w; x += step) {
@@ -4500,35 +4522,40 @@ const BG_FX = {
 };
 function bgDraw(b) {
   const box = b.box.getBoundingClientRect(), cv = b.canvas.getBoundingClientRect();
-  const w = cv.width, h = cv.height, off = cv.top - box.top;
+  const w = cv.width, h = cv.height;
   if (!w || !h) return;
   const dpr = Math.min(1.5, window.devicePixelRatio || 1);
   if (b.canvas.width !== Math.round(w * dpr) || b.canvas.height !== Math.round(h * dpr)) {
     b.canvas.width = Math.round(w * dpr); b.canvas.height = Math.round(h * dpr);
   }
-  const ctx = b.ctx, P = b.pal, t = b.t;
+  const ctx = b.ctx, P = b.pal, t = bgT;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
-  // два пятна, красное и синее, медленно плывут; символ берёт цвет ближайшего пятна
-  const R = Math.max(w, h) * 0.55;
-  const spots = [[P.red, w * (0.78 + 0.08 * Math.sin(t * 0.00011)), h * (0.25 + 0.12 * Math.cos(t * 0.00013))],
-                 [P.blue, w * (0.18 + 0.08 * Math.cos(t * 0.00009)), h * (0.75 + 0.1 * Math.sin(t * 0.00012))]];
+  // видна только часть холста: внутри своего блока и на экране
+  const W = document.documentElement.clientWidth || w, H = window.innerHeight || h;
+  const v = { top: cv.top, H, ya: Math.max(0, box.top - cv.top, -cv.top), yb: Math.min(h, box.bottom - cv.top, H - cv.top) };
+  if (v.yb <= v.ya) return;
+  // два пятна, красное и синее, медленно плывут по экрану; символ берёт цвет ближайшего пятна
+  const R = Math.max(W, H) * 0.55;
+  const spots = [[P.red, W * (0.78 + 0.08 * Math.sin(t * 0.00011)) - cv.left, H * (0.25 + 0.12 * Math.cos(t * 0.00013)) - cv.top],
+                 [P.blue, W * (0.18 + 0.08 * Math.cos(t * 0.00009)) - cv.left, H * (0.75 + 0.1 * Math.sin(t * 0.00012)) - cv.top]];
   ctx.globalCompositeOperation = P.dark ? 'lighter' : 'source-over';
   for (const [rgb, x, y] of spots) {
     const g = ctx.createRadialGradient(x, y, 0, x, y, R);
     g.addColorStop(0, `rgba(${rgb},${P.blob})`); g.addColorStop(1, `rgba(${rgb},0)`);
-    ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = g; ctx.fillRect(0, v.ya, w, v.yb - v.ya);
   }
   ctx.globalCompositeOperation = 'source-over';
   const near = (x, y) => (Math.hypot(x - spots[0][1], y - spots[0][2]) < Math.hypot(x - spots[1][1], y - spots[1][2]) ? P.red : P.blue);
-  BG_FX[bgKind](ctx, P, w, h, off, t, near);
+  BG_FX[bgKind](ctx, P, w, cv.top + window.scrollY, t, near, v);
 }
 function bgStill() { bgBands.forEach((b) => { if (b.visible) bgDraw(b); }); }
-function bgRepaint() { bgBands.forEach((b) => { b.pal = bgPalette(b.el); }); bgStill(); }
+function bgRepaint() { mountBg(); }   // смена темы: другие цвета и другие блоки со своим фоном
 function bgLoop(now) {
   if (!bgBands.length || calm()) { bgRunning = false; return; }
   const dt = Math.min(50, now - (bgLoop.last || now)); bgLoop.last = now;
-  bgBands.forEach((b) => { if (b.visible) { b.t += dt; bgDraw(b); } });
+  bgT += dt;   // одни часы на все блоки — узор на стыках совпадает
+  bgBands.forEach((b) => { if (b.visible) bgDraw(b); });
   requestAnimationFrame(bgLoop);
 }
 function mountBg() {
@@ -4536,21 +4563,28 @@ function mountBg() {
   if (bgSize) bgSize.disconnect();
   $$('.bg-fx').forEach((el) => el.remove());
   bgBands = [];
-  if (!BG_FX[bgKind] || !window.IntersectionObserver) return;
+  const on = !!BG_FX[bgKind] && !!window.IntersectionObserver;
+  document.documentElement.classList.toggle('bg-on', on);
+  if (!on) return;
   bgSeen = new IntersectionObserver((list) => list.forEach((e) => {
     const b = bgBands.find((x) => x.el === e.target);
     if (b) { b.visible = e.isIntersecting; if (b.visible) bgDraw(b); }
   }));
   bgSize = window.ResizeObserver ? new ResizeObserver(() => bgStill()) : null;
-  for (const el of $$('#site main > section:not(.hero), #site footer')) {
+  const add = (el, page) => {
     const box = document.createElement('div'), canvas = document.createElement('canvas');
-    box.className = 'bg-fx'; box.setAttribute('aria-hidden', 'true');
+    box.className = page ? 'bg-fx bg-fx--page' : 'bg-fx'; box.setAttribute('aria-hidden', 'true');
     box.appendChild(canvas); el.prepend(box);
-    const b = { el, box, canvas, ctx: canvas.getContext('2d'), pal: bgPalette(el), t: 2000 + bgHash(bgBands.length, 1) * 6000, visible: false };
-    bgBands.push(b);
-    bgSeen.observe(el);
-    if (bgSize) bgSize.observe(el);
+    bgBands.push({ el, box, canvas, ctx: canvas.getContext('2d'), pal: bgPalette(el), visible: page });
+    if (bgSize) bgSize.observe(page ? document.documentElement : el);
+    if (!page) bgSeen.observe(el);
+  };
+  add(document.body, true);
+  for (const el of $$('#site main > section, #site footer')) {
+    const c = getComputedStyle(el).backgroundColor;
+    if (c && c !== 'transparent' && c !== 'rgba(0, 0, 0, 0)') add(el, false);   // свой цвет — свой холст
   }
+  bgStill();
   if (!bgRunning && !calm()) { bgRunning = true; bgLoop.last = 0; requestAnimationFrame(bgLoop); }
 }
 function setSiteBg(kind) {
@@ -5490,6 +5524,7 @@ function boot() {
   LANG = initialLang();
   CUR = initialCur();
   window.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('resize', () => bgStill(), { passive: true });   // холст фона — под новый размер экрана
   document.addEventListener('click', (e) => {   // меню в шапке и переключатели валюты в ценах и в конструкторе
     const toggle = e.target.closest('#site .pick-btn');
     if (toggle) {
