@@ -312,6 +312,18 @@ textarea.in{min-height:96px;resize:vertical}
 .opts--list .opt input:checked+span::after{content:"";position:absolute;left:19px;top:14px;width:5px;height:10px;border:solid currentColor;border-width:0 2px 2px 0;transform:rotate(45deg)}
 .consent{display:flex;gap:10px;align-items:flex-start;font-size:14px;color:var(--night-muted);margin-top:6px}
 .consent input{width:18px;height:18px;margin:2px 0 0;flex:none;accent-color:var(--gold)}
+.consent .link-like{color:inherit;font-weight:600}
+.consent small{display:block;margin-top:4px;font-size:13px}
+.foot-nav .link-like{color:inherit;font:inherit;text-decoration:none}
+.foot-nav .link-like:hover{text-decoration:underline}
+#privacy{border-radius:20px;background:var(--bg);width:min(720px,calc(100vw - 24px));max-height:calc(100dvh - 24px)}
+#privacy[open]{display:flex;flex-direction:column}
+.privacy-body{overflow:auto;padding:18px 22px 26px;font-size:15px;line-height:1.55}
+.privacy-body h4{font-size:16px;margin:20px 0 6px}
+.privacy-body p,.privacy-body li{margin:0 0 8px}
+.privacy-body ul{padding-left:20px;margin:0 0 8px}
+.privacy-lead{color:var(--muted);font-size:14px}
+.privacy-body .fill{background:#FFE58A;color:#3A2A00;padding:0 4px;border-radius:4px}
 .err{color:var(--warn);font-size:14.500px;min-height:22px;margin-top:10px}
 .panel-foot{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:14px 20px;border-top:1px solid var(--night-line);margin-top:8px;padding-top:22px}
 .est{font-size:14px;color:var(--night-muted)}
@@ -1249,7 +1261,7 @@ select.a-in{appearance:auto}
           </div>
           <fieldset><legend>Как удобнее</legend><div class="opts" id="optChannel"></div></fieldset>
           <label class="f"><span>Что ещё важно знать</span><textarea class="in" name="note" maxlength="800"></textarea></label>
-          <label class="consent"><input type="checkbox" name="consent" value="1"><span>Согласен на обработку контактных данных для связи по этой заявке. Черновик хранится только в вашем браузере, пока вы его не отправите.</span></label>
+          <label class="consent"><input type="checkbox" name="consent" value="1"><span>Согласен на обработку персональных данных для связи по этой заявке. <button type="button" class="link-like" data-privacy>Политика конфиденциальности</button><small>Черновик хранится только в вашем браузере, пока вы его не отправите.</small></span></label>
         </section>
 
         <section class="step" data-step="6" hidden>
@@ -1303,7 +1315,7 @@ select.a-in{appearance:auto}
   <div class="wrap foot-in">
     <span class="logo"><svg viewBox="0 0 32 32" aria-hidden="true"><path style="fill:var(--brand)" d="M7 2h13l7 7v18a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V5a3 3 0 0 1 3-3z"/><path style="fill:var(--accent)" d="M20 2l7 7h-5a2 2 0 0 1-2-2z"/><rect fill="#fff" x="9" y="14" width="13" height="2.500" rx="1.250"/><rect fill="#fff" x="9" y="19.500" width="8.500" height="2.500" rx="1.250"/></svg><span>Varaq</span></span>
     <span>Сайты и Telegram-боты с чистого листа. Ташкент</span>
-    <nav class="foot-nav" aria-label="Разделы в подвале"><a href="#examples">Примеры</a><a href="#process">Как работаем</a><a href="#prices">Цены</a><a href="#brief">Конструктор ТЗ</a></nav>
+    <nav class="foot-nav" aria-label="Разделы в подвале"><a href="#examples">Примеры</a><a href="#process">Как работаем</a><a href="#prices">Цены</a><a href="#brief">Конструктор ТЗ</a><button type="button" class="link-like" data-privacy>Политика конфиденциальности</button></nav>
     <span id="footContacts"></span>
     <span>© 2026</span>
     <button type="button" class="foot-link" id="ownerLink">Вход для владельца</button>
@@ -1326,9 +1338,16 @@ select.a-in{appearance:auto}
     <button type="button" class="btn" id="demoWant">Хочу похожий сайт</button>
   </div>
 </dialog>
+<dialog id="privacy" aria-labelledby="privacyTitle">
+  <div class="demo-head">
+    <div><h3 id="privacyTitle">Политика конфиденциальности</h3></div>
+    <button type="button" class="x" id="privacyClose" aria-label="Закрыть политику">×</button>
+  </div>
+  <div class="privacy-body" tabindex="0" role="region" aria-labelledby="privacyTitle"></div>
+</dialog>
 </div>
 <div id="toast" role="status" aria-live="polite" hidden></div>
-<script type="application/json" id="site-data">{"v":2,"updatedAt":"","brand":{"name":"Varaq","tagline":"Сайты и Telegram-боты с чистого листа","city":"Ташкент"},"contacts":{"telegram":"","email":"","phone":"","replyTime":"в течение рабочего дня","orderEndpoint":""},"texts":{"heroTitle":"Закажите сайт без догадок о цене и сроках","heroLead":"Ответьте на шесть вопросов. Конструктор соберёт техническое задание на одном листе, покажет вилку цены и срок. Останется отправить его нам.","seoTitle":"Varaq — разработка сайтов и Telegram-ботов, Ташкент","seoDescription":"Закажите сайт без догадок о цене и сроках: конструктор соберёт техническое задание за 5 минут и покажет вилку цены. Лендинги, сайты компаний, интернет-магазины, веб-сервисы и Telegram-боты."},"pricing":{"currency":"млн сум","types":{"landing":{"price":[3,9],"weeks":[1,2]},"corp":{"price":[7,22],"weeks":[2,4]},"shop":{"price":[15,50],"weeks":[3,8]},"app":{"price":[25,90],"weeks":[5,14]},"bot":{"price":[2.5,12],"weeks":[1,3]}},"features":{"form":[0.3,1],"tg":[0.3,1],"pay":[2,6],"catalog":[3,9],"cart":[2,6],"account":[5,15],"booking":[2,7],"admin":[1.5,5],"blog":[1,3],"crm":[4,12],"chat":[0.3,1.5],"map":[0.2,0.8],"notify":[1,4],"analytics":[0.3,1],"seo":[1,3]},"mods":{"page":[0.4,1.2],"lang":[10,20],"rush":[20,30],"brand":[1.5,5],"content":[1,4],"contentPart":[0.5,2]}},"uz":{"heroTitle":"Sayt narxi va muddatini oldindan biling","heroLead":"Oltita savolga javob bering. Konstruktor texnik topshiriqni bitta varaqqa jamlaydi, narx oralig‘i va muddatni ko‘rsatadi. Uni bizga yuborish qoladi, xolos.","tagline":"Saytlar va Telegram-botlar — toza varaqdan","city":"Toshkent","replyTime":"bir ish kuni ichida","faq":[{"q":"Menga qanday sayt kerakligini bilmayman. Nima qilay?","a":"Konstruktorda o‘zingizga yaqinini tanlang, qolganini o‘tkazib yuboring. To‘ldirilmagan hamma narsa «Ochiq savollar» bo‘limiga tushadi — uni birga ko‘rib chiqib, yechim taklif qilamiz."},{"q":"Nega narx oraliq bilan ko‘rsatilgan?","a":"Aniq narx tafsilotlarga bog‘liq: bo‘limlar soni, funksiyalar, matn va suratlarning tayyorligi. Oraliq «…dan» degan raqamdan halolroq. Yakuniy summani ish boshlanishidan oldin shartnomada belgilaymiz."},{"q":"Mendan nima kerak bo‘ladi?","a":"Logotip, matn va suratlar — agar bor bo‘lsa. Bo‘lmasa, buni konstruktorda belgilang: o‘zimiz tayyorlaymiz, narxi hisob-kitobga kiradi."},{"q":"Sayt kimga tegishli bo‘ladi?","a":"Sizga. Domen va hosting kompaniyangiz nomiga rasmiylashtiriladi, kod va kirish ma’lumotlarini to‘lovdan keyin topshiramiz."},{"q":"Saytni dasturchisiz o‘zim o‘zgartira olamanmi?","a":"Ha, agar konstruktorda «Admin-panel»ni belgilasangiz. Matn, surat va narxlarni o‘zingiz o‘zgartirasiz, yo‘riqnoma qoldiramiz."},{"q":"Ishga tushirilgandan keyin nima bo‘ladi?","a":"Kirish ma’lumotlari va yo‘riqnomani topshiramiz, arizalar yetib kelayotganini tekshiramiz. Qo‘llab-quvvatlash va qo‘shimcha ishlarni alohida, vazifalaringizga qarab kelishamiz."}]},"projects":[{"id":"savdex","name":"SavdEx","url":"https://savdex.uz/","kind":"B2B-площадка Узбекистана и Центральной Азии: каталог поставщиков, запросы на закупку и тендеры","kindUz":"O‘zbekiston va Markaziy Osiyoning B2B-maydoni: yetkazib beruvchilar katalogi, xarid so‘rovlari va tenderlar","type":"app","color":"#1F5FD1","cover":"","visible":true},{"id":"pathway","name":"PATHWAY","url":"https://pathway.uz/","kind":"Подбор зарубежных вузов по IELTS, SAT и школьным оценкам: сайт на трёх языках и Telegram-бот","kindUz":"IELTS, SAT va maktab baholari bo‘yicha xorijiy universitet tanlash: uch tilli sayt va Telegram-bot","type":"app","color":"#14213D","cover":"","visible":true}],"demos":{"tabassum":true,"sandiq":true,"atlas":true,"qurilish":true,"lingo":true,"osh":true,"navbat":true},"faq":[{"q":"Я не знаю, какой сайт мне нужен. Что делать?","a":"Выберите в конструкторе то, что ближе, остальное пропустите. Всё незаполненное попадёт в раздел «Открытые вопросы» — разберём его вместе и предложим решение."},{"q":"Почему цена указана вилкой?","a":"Точная цена зависит от деталей: числа разделов, функций, готовности текстов и фото. Вилка честнее цифры «от». Итоговую сумму фиксируем в договоре до начала работ."},{"q":"Что нужно от меня?","a":"Логотип, тексты и фото, если они есть. Если нет — отметьте это в конструкторе: подготовим сами, стоимость войдёт в оценку."},{"q":"Кому принадлежит сайт?","a":"Вам. Домен и хостинг оформляются на вашу компанию, код и доступы передаём после оплаты."},{"q":"Смогу ли я менять сайт без программиста?","a":"Да, если отметить в конструкторе «Админ-панель». Тексты, фото и цены вы меняете сами, инструкцию оставляем."},{"q":"Что происходит после запуска?","a":"Передаём доступы и инструкцию, проверяем, что заявки доходят. Поддержку и доработки обсуждаем отдельно — по вашим задачам."}]}</script>
+<script type="application/json" id="site-data">{"v":2,"updatedAt":"","brand":{"name":"Varaq","tagline":"Сайты и Telegram-боты с чистого листа","city":"Ташкент"},"contacts":{"telegram":"","email":"","phone":"","replyTime":"в течение рабочего дня","orderEndpoint":"","legal":""},"texts":{"heroTitle":"Закажите сайт без догадок о цене и сроках","heroLead":"Ответьте на шесть вопросов. Конструктор соберёт техническое задание на одном листе, покажет вилку цены и срок. Останется отправить его нам.","seoTitle":"Varaq — разработка сайтов и Telegram-ботов, Ташкент","seoDescription":"Закажите сайт без догадок о цене и сроках: конструктор соберёт техническое задание за 5 минут и покажет вилку цены. Лендинги, сайты компаний, интернет-магазины, веб-сервисы и Telegram-боты."},"pricing":{"currency":"млн сум","types":{"landing":{"price":[3,9],"weeks":[1,2]},"corp":{"price":[7,22],"weeks":[2,4]},"shop":{"price":[15,50],"weeks":[3,8]},"app":{"price":[25,90],"weeks":[5,14]},"bot":{"price":[2.5,12],"weeks":[1,3]}},"features":{"form":[0.3,1],"tg":[0.3,1],"pay":[2,6],"catalog":[3,9],"cart":[2,6],"account":[5,15],"booking":[2,7],"admin":[1.5,5],"blog":[1,3],"crm":[4,12],"chat":[0.3,1.5],"map":[0.2,0.8],"notify":[1,4],"analytics":[0.3,1],"seo":[1,3]},"mods":{"page":[0.4,1.2],"lang":[10,20],"rush":[20,30],"brand":[1.5,5],"content":[1,4],"contentPart":[0.5,2]}},"uz":{"heroTitle":"Sayt narxi va muddatini oldindan biling","heroLead":"Oltita savolga javob bering. Konstruktor texnik topshiriqni bitta varaqqa jamlaydi, narx oralig‘i va muddatni ko‘rsatadi. Uni bizga yuborish qoladi, xolos.","tagline":"Saytlar va Telegram-botlar — toza varaqdan","city":"Toshkent","replyTime":"bir ish kuni ichida","faq":[{"q":"Menga qanday sayt kerakligini bilmayman. Nima qilay?","a":"Konstruktorda o‘zingizga yaqinini tanlang, qolganini o‘tkazib yuboring. To‘ldirilmagan hamma narsa «Ochiq savollar» bo‘limiga tushadi — uni birga ko‘rib chiqib, yechim taklif qilamiz."},{"q":"Nega narx oraliq bilan ko‘rsatilgan?","a":"Aniq narx tafsilotlarga bog‘liq: bo‘limlar soni, funksiyalar, matn va suratlarning tayyorligi. Oraliq «…dan» degan raqamdan halolroq. Yakuniy summani ish boshlanishidan oldin shartnomada belgilaymiz."},{"q":"Mendan nima kerak bo‘ladi?","a":"Logotip, matn va suratlar — agar bor bo‘lsa. Bo‘lmasa, buni konstruktorda belgilang: o‘zimiz tayyorlaymiz, narxi hisob-kitobga kiradi."},{"q":"Sayt kimga tegishli bo‘ladi?","a":"Sizga. Domen va hosting kompaniyangiz nomiga rasmiylashtiriladi, kod va kirish ma’lumotlarini to‘lovdan keyin topshiramiz."},{"q":"Saytni dasturchisiz o‘zim o‘zgartira olamanmi?","a":"Ha, agar konstruktorda «Admin-panel»ni belgilasangiz. Matn, surat va narxlarni o‘zingiz o‘zgartirasiz, yo‘riqnoma qoldiramiz."},{"q":"Ishga tushirilgandan keyin nima bo‘ladi?","a":"Kirish ma’lumotlari va yo‘riqnomani topshiramiz, arizalar yetib kelayotganini tekshiramiz. Qo‘llab-quvvatlash va qo‘shimcha ishlarni alohida, vazifalaringizga qarab kelishamiz."}]},"projects":[{"id":"savdex","name":"SavdEx","url":"https://savdex.uz/","kind":"B2B-площадка Узбекистана и Центральной Азии: каталог поставщиков, запросы на закупку и тендеры","kindUz":"O‘zbekiston va Markaziy Osiyoning B2B-maydoni: yetkazib beruvchilar katalogi, xarid so‘rovlari va tenderlar","type":"app","color":"#1F5FD1","cover":"","visible":true},{"id":"pathway","name":"PATHWAY","url":"https://pathway.uz/","kind":"Подбор зарубежных вузов по IELTS, SAT и школьным оценкам: сайт на трёх языках и Telegram-бот","kindUz":"IELTS, SAT va maktab baholari bo‘yicha xorijiy universitet tanlash: uch tilli sayt va Telegram-bot","type":"app","color":"#14213D","cover":"","visible":true}],"demos":{"tabassum":true,"sandiq":true,"atlas":true,"qurilish":true,"lingo":true,"osh":true,"navbat":true},"faq":[{"q":"Я не знаю, какой сайт мне нужен. Что делать?","a":"Выберите в конструкторе то, что ближе, остальное пропустите. Всё незаполненное попадёт в раздел «Открытые вопросы» — разберём его вместе и предложим решение."},{"q":"Почему цена указана вилкой?","a":"Точная цена зависит от деталей: числа разделов, функций, готовности текстов и фото. Вилка честнее цифры «от». Итоговую сумму фиксируем в договоре до начала работ."},{"q":"Что нужно от меня?","a":"Логотип, тексты и фото, если они есть. Если нет — отметьте это в конструкторе: подготовим сами, стоимость войдёт в оценку."},{"q":"Кому принадлежит сайт?","a":"Вам. Домен и хостинг оформляются на вашу компанию, код и доступы передаём после оплаты."},{"q":"Смогу ли я менять сайт без программиста?","a":"Да, если отметить в конструкторе «Админ-панель». Тексты, фото и цены вы меняете сами, инструкцию оставляем."},{"q":"Что происходит после запуска?","a":"Передаём доступы и инструкцию, проверяем, что заявки доходят. Поддержку и доработки обсуждаем отдельно — по вашим задачам."}]}</script>
 <script id="site-js">(() => {
 'use strict';
 
@@ -1541,7 +1560,10 @@ const UZ = {
   'Телефон': 'Telefon',
   'Как удобнее': 'Qaysi biri qulay',
   'Что ещё важно знать': 'Yana nimani bilishimiz muhim',
-  'Согласен на обработку контактных данных для связи по этой заявке. Черновик хранится только в вашем браузере, пока вы его не отправите.': 'Shu ariza bo‘yicha bog‘lanish uchun aloqa ma’lumotlarimni qayta ishlashga roziman. Qoralama uni yubormaguningizcha faqat brauzeringizda saqlanadi.',
+  'Согласен на обработку персональных данных для связи по этой заявке.': 'Shu ariza bo‘yicha bog‘lanish uchun shaxsga doir ma’lumotlarimga ishlov berishga roziman.',
+  'Политика конфиденциальности': 'Maxfiylik siyosati',
+  'Закрыть политику': 'Siyosatni yopish',
+  'Черновик хранится только в вашем браузере, пока вы его не отправите.': 'Qoralama uni yubormaguningizcha faqat brauzeringizda saqlanadi.',
   'Назад': 'Orqaga',
   'Дальше': 'Davom etish',
   'Собрать ТЗ': 'TZni yig‘ish',
@@ -1945,7 +1967,7 @@ const DEFAULTS = {
   v: 2,
   updatedAt: '',
   brand: { name: 'Varaq', tagline: 'Сайты и Telegram-боты с чистого листа', city: 'Ташкент' },
-  contacts: { telegram: '', email: '', phone: '', replyTime: 'в течение рабочего дня', orderEndpoint: '' },
+  contacts: { telegram: '', email: '', phone: '', replyTime: 'в течение рабочего дня', orderEndpoint: '', legal: '' },
   texts: {
     heroTitle: 'Закажите сайт без догадок о цене и сроках',
     heroLead: 'Ответьте на шесть вопросов. Конструктор соберёт техническое задание на одном листе, покажет вилку цены и срок. Останется отправить его нам.',
@@ -2105,6 +2127,7 @@ function normalize(raw) {
   d.contacts.email = validEmail(mail) ? mail : '';
   d.contacts.phone = sLine(c.phone, 30);
   d.contacts.replyTime = sLine(c.replyTime, 60) || d.contacts.replyTime;
+  d.contacts.legal = sLine(c.legal, 160);
   const endpoint = safeUrl(c.orderEndpoint);
   d.contacts.orderEndpoint = endpoint.startsWith('https://') ? endpoint : '';
 
@@ -2459,6 +2482,53 @@ function footContactsHTML(d) {
   return out.join(' &nbsp; ');
 }
 
+/* Политика конфиденциальности (Закон РУз «О персональных данных», ЗРУ-547).
+   Пишет только то, что сайт и сервер делают на самом деле. Меняете обработку данных — поправьте и текст. */
+const PRIVACY_DATE = ['2 ноября 2026 г.', '2026-yil 2-noyabr'];
+function privacyHTML(d) {
+  const uz = LANG === 'uz', L = (ru, u) => (uz ? u : ru);
+  const brand = esc(d.brand.name);
+  /* Пустые поля видны как пометка «заполнить»: заполните contacts.legal, telegram, phone, email в настройках сайта. */
+  const blank = (ru, u) => `<mark class="fill">[${L(ru, u)}]</mark>`;
+  const owner = d.contacts.legal ? esc(d.contacts.legal) : blank('название фирмы или ФИО предпринимателя, ИНН — заполнить', 'firma nomi yoki tadbirkorning F.I.Sh., STIR — to‘ldirish kerak');
+  const links = footContactsHTML(d) || blank('Telegram, телефон или почта — заполнить', 'Telegram, telefon yoki pochta — to‘ldirish kerak');
+  const write = L(`Напишите нам: ${links}.`, `Bizga yozing: ${links}.`);
+  const h = (ru, u) => `<h4>${L(ru, u)}</h4>`, para = (ru, u) => `<p>${L(ru, u)}</p>`;
+  return `<p class="privacy-lead">${L(`Как ${brand} обрабатывает персональные данные из заявок. Редакция от ${PRIVACY_DATE[0]}`, `${brand} arizalardagi shaxsga doir ma’lumotlarga qanday ishlov beradi. Tahrir: ${PRIVACY_DATE[1]}.`)}</p>
+${h('Кто обрабатывает данные', 'Ma’lumotlarga kim ishlov beradi')}
+${para(`Владелец и оператор персональных данных — ${owner}. Политика составлена по Закону Республики Узбекистан «О персональных данных» (№ ЗРУ-547 от 2 июля 2019 г.).`,
+  `Shaxsga doir ma’lumotlar mulkdori va operatori — ${owner}. Siyosat O‘zbekiston Respublikasining «Shaxsga doir ma’lumotlar to‘g‘risida»gi Qonuniga (2019-yil 2-iyuldagi O‘RQ-547-son) muvofiq tuzilgan.`)}
+${h('Какие данные мы получаем', 'Qanday ma’lumotlarni olamiz')}
+<ul>
+<li>${L('Имя и способ связи, которые вы указали: телефон и (или) ник в Telegram.', 'Siz ko‘rsatgan ism va aloqa usuli: telefon va (yoki) Telegram-nik.')}</li>
+<li>${L('Ответы в конструкторе ТЗ: тип проекта, пожелания, сроки, бюджет, комментарий.', 'Konstruktordagi javoblaringiz: loyiha turi, istaklar, muddat, byudjet, izoh.')}</li>
+<li>${L('Технические данные, которые получает любой веб-сервер: IP-адрес и сведения о браузере. Они нужны для защиты формы от спама и попадают в технические журналы сервера.', 'Har qanday veb-server oladigan texnik ma’lumotlar: IP-manzil va brauzer haqidagi ma’lumot. Ular formani spamdan himoya qilish uchun kerak va serverning texnik jurnallariga yoziladi.')}</li>
+</ul>
+${para('Мы не просим паспортные данные, не собираем биометрию и не ставим рекламные cookie. Счётчик посещений считает только число шагов — без имён, адресов и устройств.',
+  'Pasport ma’lumotlarini so‘ramaymiz, biometrik ma’lumot yig‘maymiz va reklama cookie fayllarini qo‘ymaymiz. Tashriflar hisoblagichi faqat qadamlar sonini sanaydi — ismlar, manzillar va qurilmalarsiz.')}
+${h('Зачем', 'Nima maqsadda')}
+${para('Только чтобы связаться с вами по этой заявке, уточнить задачу, подготовить предложение и договор. Рассылок и рекламы по этим данным не будет.',
+  'Faqat shu ariza bo‘yicha siz bilan bog‘lanish, vazifani aniqlashtirish, taklif va shartnoma tayyorlash uchun. Bu ma’lumotlarga xabarnoma va reklama yuborilmaydi.')}
+${h('Где хранятся и кто их видит', 'Qayerda saqlanadi va kim ko‘radi')}
+${para(`Заявка сохраняется на сервере сайта, её копия приходит администраторам ${brand} в Telegram. Доступ есть только у тех, кто работает с заявками. Мы не продаём данные и не передаём их третьим лицам, кроме случаев, прямо предусмотренных законом.`,
+  `Ariza sayt serverida saqlanadi, uning nusxasi ${brand} administratorlariga Telegram orqali keladi. Unga faqat arizalar bilan ishlaydiganlar kira oladi. Ma’lumotlarni sotmaymiz va qonunda bevosita nazarda tutilgan hollardan tashqari uchinchi shaxslarga bermaymiz.`)}
+${para('Telegram — иностранный сервис, его серверы находятся за пределами Узбекистана. Отмечая согласие, вы соглашаетесь и на передачу через него имени, контактов и текста заявки (трансграничную передачу).',
+  'Telegram — xorijiy xizmat, uning serverlari O‘zbekistondan tashqarida joylashgan. Rozilik belgilab, siz ism, aloqa ma’lumotlari va ariza matnini u orqali uzatishga (transchegaraviy uzatishga) ham rozilik bildirasiz.')}
+${para('Если вы сами отправляете ТЗ через Telegram или почту, данные проходят через этот сервис по его правилам. Шрифты сайта загружаются с серверов Google: Google видит ваш IP-адрес, но не данные формы.',
+  'Agar texnik topshiriqni o‘zingiz Telegram yoki pochta orqali yuborsangiz, ma’lumotlar shu xizmat orqali, uning qoidalari bo‘yicha o‘tadi. Sayt shriftlari Google serverlaridan yuklanadi: Google IP-manzilingizni ko‘radi, lekin forma ma’lumotlarini ko‘rmaydi.')}
+${h('Сколько храним', 'Qancha muddat saqlaymiz')}
+${para('Заявку храним не дольше 6 месяцев с момента отправки, затем сервер удаляет её автоматически. Если вы отзовёте согласие или попросите удалить данные, удалим раньше. Если мы заключим договор, данные, нужные для него, хранятся вместе с договором столько, сколько требует закон.',
+  'Arizani yuborilgan paytdan boshlab 6 oydan ortiq saqlamaymiz, so‘ng server uni avtomatik o‘chiradi. Rozilikni qaytarib olsangiz yoki ma’lumotlarni o‘chirishni so‘rasangiz, undan oldin o‘chiramiz. Agar shartnoma tuzsak, unga kerakli ma’lumotlar qonun talab qilgan muddat davomida shartnoma bilan birga saqlanadi.')}
+${h('Черновик в браузере', 'Brauzerdagi qoralama')}
+${para('Пока вы заполняете конструктор, черновик хранится только в вашем браузере и никуда не отправляется. Стереть его можно кнопкой «Очистить и начать заново» в конце конструктора или очисткой данных сайта в браузере.',
+  'Konstruktorni to‘ldirayotganingizda qoralama faqat brauzeringizda saqlanadi va hech qayerga yuborilmaydi. Uni konstruktor oxiridagi «Tozalab, boshidan boshlash» tugmasi bilan yoki brauzerda sayt ma’lumotlarini tozalab o‘chirish mumkin.')}
+${h('Ваши права', 'Sizning huquqlaringiz')}
+${para('Вы можете узнать, какие ваши данные у нас есть, исправить их, потребовать удалить или отозвать согласие. ' + write,
+  'Bizda siz haqingizda qanday ma’lumotlar borligini bilishingiz, ularni tuzattirishingiz, o‘chirishni talab qilishingiz yoki rozilikni qaytarib olishingiz mumkin. ' + write)}
+${para('Без согласия заявку отправить нельзя: без контактов мы не сможем вам ответить.',
+  'Roziliksiz arizani yuborib bo‘lmaydi: aloqa ma’lumotlarisiz sizga javob bera olmaymiz.')}`;
+}
+
 function siteHTML(d) {
   const hasReal = visibleProjects(d).length > 0, hasDemo = visibleDemos(d).length > 0;
   const faq = faqOf(d);
@@ -2670,7 +2740,7 @@ function siteHTML(d) {
           </div>
           <fieldset><legend>Как удобнее</legend><div class="opts" id="optChannel"></div></fieldset>
           <label class="f"><span>Что ещё важно знать</span><textarea class="in" name="note" maxlength="800"></textarea></label>
-          <label class="consent"><input type="checkbox" name="consent" value="1"><span>Согласен на обработку контактных данных для связи по этой заявке. Черновик хранится только в вашем браузере, пока вы его не отправите.</span></label>
+          <label class="consent"><input type="checkbox" name="consent" value="1"><span>Согласен на обработку персональных данных для связи по этой заявке. <button type="button" class="link-like" data-privacy>Политика конфиденциальности</button><small>Черновик хранится только в вашем браузере, пока вы его не отправите.</small></span></label>
         </section>
 
         <section class="step" data-step="6" hidden>
@@ -2724,7 +2794,7 @@ function siteHTML(d) {
   <div class="wrap foot-in">
     <span class="logo">${LOGO_SVG}<span>${esc(d.brand.name)}</span></span>
     <span>${esc([pick(d.brand.tagline, d.uz.tagline), pick(d.brand.city, d.uz.city)].filter(Boolean).join('. '))}</span>
-    <nav class="foot-nav" aria-label="Разделы в подвале">${hasDemo ? '<a href="#examples">Примеры</a>' : ''}<a href="#process">Как работаем</a><a href="#prices">Цены</a><a href="#brief">Конструктор ТЗ</a></nav>
+    <nav class="foot-nav" aria-label="Разделы в подвале">${hasDemo ? '<a href="#examples">Примеры</a>' : ''}<a href="#process">Как работаем</a><a href="#prices">Цены</a><a href="#brief">Конструктор ТЗ</a><button type="button" class="link-like" data-privacy>Политика конфиденциальности</button></nav>
     <span id="footContacts">${footContactsHTML(d)}</span>
     <span>© ${new Date().getFullYear()}</span>
     <button type="button" class="foot-link" id="ownerLink">Вход для владельца</button>
@@ -2746,6 +2816,13 @@ function siteHTML(d) {
     <p>Демо-концепт. Ваш сайт соберём под ваш бизнес и фирменный стиль.</p>
     <button type="button" class="btn" id="demoWant">Хочу похожий сайт</button>
   </div>
+</dialog>
+<dialog id="privacy" aria-labelledby="privacyTitle">
+  <div class="demo-head">
+    <div><h3 id="privacyTitle">Политика конфиденциальности</h3></div>
+    <button type="button" class="x" id="privacyClose" aria-label="Закрыть политику">×</button>
+  </div>
+  <div class="privacy-body" tabindex="0" role="region" aria-labelledby="privacyTitle">${privacyHTML(d)}</div>
 </dialog>`;
 }
 
@@ -3398,6 +3475,13 @@ function mount() {
     demoPhone = btn.dataset.view === 'phone';
     drawDemo();
   });
+  const privacy = $('#privacy');
+  const closePrivacy = () => { if (typeof privacy.close === 'function') privacy.close(); else privacy.removeAttribute('open'); };
+  $$('[data-privacy]').forEach((btn) => btn.addEventListener('click', () => {
+    if (typeof privacy.showModal === 'function') privacy.showModal(); else privacy.setAttribute('open', '');
+  }));
+  $('#privacyClose').addEventListener('click', closePrivacy);
+  privacy.addEventListener('click', (e) => { if (e.target === privacy) closePrivacy(); });
   $('#demoWant').addEventListener('click', () => {
     const demo = currentDemo;
     closeDemo();
@@ -3562,6 +3646,7 @@ ${fld('Почта для заявок', 'contacts.email', { max: 120, ph: 'на�
 ${fld('Телефон в подвале сайта', 'contacts.phone', { max: 30, ph: '+998 90 123 45 67', mode: 'tel' })}
 ${fld('Как быстро отвечаете', 'contacts.replyTime', { max: 60, ph: 'в течение рабочего дня', help: 'Подставляется во фразу «Ответим …».' })}
 </div>
+${fld('Владелец сайта (для политики конфиденциальности)', 'contacts.legal', { max: 160, ph: 'ООО «Варак», ИНН 123456789', help: 'Название фирмы или ФИО предпринимателя и ИНН. В политике это оператор персональных данных. Пусто — будет «студия» и название бренда, для закона этого мало.' })}
 <div class="a-box"><b>Что увидит клиент, когда соберёт ТЗ</b><div class="a-pills" id="aDonePreview"></div></div>
 <h4>Свой сервер для заявок</h4>
 <p class="a-lead">${serverMode

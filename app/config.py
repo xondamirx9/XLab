@@ -40,6 +40,7 @@ class Config:
     site_dir: Path
     data_dir: Path
     trust_proxy: bool
+    order_retention_days: int = 180      # срок хранения заявок; столько же обещает политика конфиденциальности. 0 — не удалять
     # студия white-label сайтов и новости
     public_url: str = ""                 # адрес сервера снаружи, для ссылок в Telegram: https://varaq.uz
     studio_enabled: bool = True
@@ -108,6 +109,7 @@ class Config:
             data_dir=_path(env("DATA_DIR", ""), "data"),
             trust_proxy=env("TRUST_PROXY", "1").strip() not in ("0", "false", "no", ""),
             public_url=public_url,
+            order_retention_days=number("ORDER_RETENTION_DAYS", 180, 0, 3650),
             studio_enabled=env("STUDIO_ENABLED", "1").strip() not in ("0", "false", "no"),
             claude_enabled=bool(env("ANTHROPIC_API_KEY", "").strip()) and env("STUDIO_OFFLINE", "0").strip() in ("0", ""),
             studio_model=env("STUDIO_MODEL", "claude-opus-5-5").strip() or "claude-opus-5-5",

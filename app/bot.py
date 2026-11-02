@@ -25,6 +25,7 @@ log = logging.getLogger("site.bot")
 
 MAX_ATTEMPTS = 30            # после этого заявка остаётся в базе, но пересылать её перестаём
 RETRY_EVERY = 60             # секунд между повторными попытками
+PURGE_EVERY = 3600           # секунд между проверками срока хранения заявок
 MESSAGE_LIMIT = 3900         # у Telegram предел 4096 знаков в сообщении
 TASHKENT = timezone(timedelta(hours=5))
 
@@ -105,12 +106,31 @@ class Notifier:
             done += int(delivered)
         return done
 
+    async def purge_expired(self) -> int:
+        """Удаляет заявки старше срока хранения (ORDER_RETENTION_DAYS). Срок 0 — ничего не удаляет."""
+        days = self._cfg.order_retention_days
+        if days <= 0:
+            return 0
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(timespec="seconds")
+        removed = await self._storage.purge_older(cutoff)
+        if removed:
+            log.info("удалено заявок старше %s дн.: %s", days, removed)
+        return removed
+
     async def run(self, stop: asyncio.Event) -> None:
+        loop = asyncio.get_running_loop()
+        next_purge = 0.0
         while not stop.is_set():
             try:
                 await self.deliver_pending()
             except Exception:                 # цикл доставки не должен умирать из-за одной ошибки
                 log.exception("сбой при пересылке заявок")
+            if loop.time() >= next_purge:     # срок хранения проверяем раз в час
+                next_purge = loop.time() + PURGE_EVERY
+                try:
+                    await self.purge_expired()
+                except Exception:
+                    log.exception("сбой при удалении старых заявок")
             self._wake.clear()
             waiters = [asyncio.create_task(self._wake.wait()), asyncio.create_task(stop.wait())]
             _, pending = await asyncio.wait(waiters, timeout=RETRY_EVERY, return_when=asyncio.FIRST_COMPLETED)
