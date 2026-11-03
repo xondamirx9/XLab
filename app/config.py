@@ -5,6 +5,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.seo import verification_code
+
 MIN_PASSWORD_LENGTH = 12
 BRAND = "Codex Lab"          # название студии в боте и сообщениях
 ROOT = Path(__file__).resolve().parent.parent
@@ -51,6 +53,8 @@ class Config:
     studio_daily_limit: int = 2          # новых сайтов в сутки на одного пользователя (администраторам — без предела)
     studio_concurrency: int = 1          # сколько сайтов собирается одновременно
     debate_rounds: int = 2
+    # подтверждение прав на сайт в Google Search Console и Яндекс Вебмастере: имя тега <meta> → код
+    search_verify: tuple[tuple[str, str], ...] = ()
 
     @property
     def publish_enabled(self) -> bool:
@@ -105,6 +109,17 @@ class Config:
         if public_url and not public_url.startswith(("https://", "http://")):
             raise ConfigError("PUBLIC_URL должен начинаться с https://, например https://codexlab.uz")
 
+        verify: list[tuple[str, str]] = []
+        for key, tag, where in (("GOOGLE_SITE_VERIFICATION", "google-site-verification", "Google Search Console"),
+                                ("YANDEX_VERIFICATION", "yandex-verification", "Яндекс Вебмастера")):
+            raw = env(key, "").strip()
+            if not raw:
+                continue
+            code = verification_code(raw)
+            if not code:
+                raise ConfigError(f"{key}: не похоже на код из {where}. Нужна строка из атрибута content тега <meta>.")
+            verify.append((tag, code))
+
         return cls(
             bot_token=env("BOT_TOKEN", "").strip(),
             admin_chat_ids=tuple(dict.fromkeys(ids)),
@@ -123,4 +138,5 @@ class Config:
             studio_daily_limit=number("STUDIO_DAILY_LIMIT", 2, 0, 100),
             studio_concurrency=number("STUDIO_CONCURRENCY", 1, 1, 8),
             debate_rounds=number("STUDIO_DEBATE_ROUNDS", 2, 1, 4),
+            search_verify=tuple(verify),
         )
