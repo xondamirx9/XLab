@@ -130,7 +130,8 @@ sudo systemctl reload caddy
 
 - Branch — `main`, Build Command — `pip install -r requirements.txt`, Start Command — `python -m app`, Health Check Path — `/api/health`;
 - в Environment: `HOST=0.0.0.0`, `BOT_TOKEN`, `ADMIN_CHAT_IDS`, `ADMIN_PASSWORD`, `PUBLIC_URL=https://ваш-сервис.onrender.com`;
-  для поисковиков — `GOOGLE_SITE_VERIFICATION` и `YANDEX_VERIFICATION` (раздел «Поиск: Google и Яндекс»).
+  для поисковиков — `GOOGLE_SITE_VERIFICATION`, `YANDEX_VERIFICATION`, `BING_SITE_VERIFICATION`, `INDEXNOW`
+  (раздел «Поиск: Google, Bing и Яндекс»).
   Порт Render передаёт сам в `PORT`. `TRUST_PROXY` задавать не нужно: сервер узнаёт Render и берёт адрес посетителя
   из цепочки его прокси, поэтому лимиты заявок и паролей считаются для каждого посетителя отдельно.
 
@@ -187,7 +188,7 @@ sudo systemctl reload caddy
 - Если курса нет совсем (сервер без интернета или сайт открыт как файл), доллары считаются по запасному курсу
   из админки («Цены» → «Курс доллара на случай, если NBU недоступен»), и сайт прямо пишет, что курс ориентировочный.
 
-## Поиск: Google и Яндекс
+## Поиск: Google, Bing и Яндекс
 
 Что сервер и страница уже делают сами:
 
@@ -198,6 +199,11 @@ sudo systemctl reload caddy
   версии между собой. Заголовок и описание на узбекском и английском правятся в админке
   («Бренд и тексты» → «Для поисковиков»), адрес сайта — там же, в поле «Адрес сайта».
 - Поисковый робот на `/` видит русскую версию, а не язык своего браузера.
+- IndexNow: после выкладки новой версии и после публикации из админки сервер сам отправляет адреса трёх
+  версий на api.indexnow.org — их получают Bing (а через него DuckDuckGo, Yahoo и поиск ChatGPT), Яндекс и другие
+  поисковики протокола. Ключ — файл `site/verify/<ключ>.txt` с тем же ключом внутри, сервер отдаёт его из корня.
+  Включено на Render и когда задан `PUBLIC_URL`; выключить — `INDEXNOW=0`. Пробуждение бесплатного Render
+  новой версией не считается: адреса уходят, только если страница моложе часа.
 
 Что сделать один раз руками:
 
@@ -209,7 +215,10 @@ sudo systemctl reload caddy
      в переменную `GOOGLE_SITE_VERIFICATION` (в `.env` или в Environment на Render), затем перезапуск сервиса.
 2. В Search Console → «Файлы Sitemap» отправьте `https://codexlab.uz/sitemap.xml`; в «Проверке URL» можно
    запросить индексирование главной страницы.
-3. Яндекс (по желанию): [Вебмастер](https://webmaster.yandex.ru) → добавить сайт → «Мета-тег»
+3. Bing: [Bing Webmaster Tools](https://www.bing.com/webmasters) → «Импорт из Google Search Console» —
+   сайт и карта переносятся без подтверждения. Или вручную: файл `BingSiteAuth.xml` — в `site/verify/`,
+   либо код мета-тега `msvalidate.01` — в `BING_SITE_VERIFICATION`.
+4. Яндекс: [Вебмастер](https://webmaster.yandex.ru) → добавить сайт → «Мета-тег»
    (код — в `YANDEX_VERIFICATION`) или «HTML-файл» (`yandex_….html` — в `site/verify/`); там же отправьте
    ту же карту сайта.
 
@@ -316,7 +325,7 @@ sudo systemctl reload caddy
 | Логотип и аватар бота | `docs/brand/` (SVG для светлого и тёмного фона, PNG), `docs/bot-avatar.png` |
 | Значки, превью для поиска и мессенджеров | `site/brand/` — сервер отдаёт их по адресам `/brand/…` и `/favicon.ico` |
 | robots.txt, карта сайта, языковые версии для поиска | `app/seo.py` — сервер собирает их из `site/index.html` |
-| Файлы подтверждения для Google и Яндекса | `site/verify/` — сервер отдаёт их из корня сайта |
+| Файлы подтверждения для Google, Bing и Яндекса, ключ IndexNow | `site/verify/` — сервер отдаёт их из корня сайта |
 | Настройки и пароли | `.env` |
 | Журнал работы | `sudo journalctl -u codexlab -n 100` |
 
