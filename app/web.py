@@ -20,6 +20,7 @@ from aiohttp import web
 from app.config import Config
 from app.news import NewsStore
 from app.rates import RateService
+from app import seo
 from app.storage import Storage
 from app.studio.pipeline import Studio
 from app.studio.store import StudioStore
@@ -218,10 +219,54 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
             response.headers.setdefault(key, value)
         return response
 
+    page_cache: dict[str, object] = {}
+
+    def load_page() -> tuple[str, seo.PageMeta, float] | None:
+        """Страница и её настройки для поисковиков. Перечитывается, когда файл изменился (публикация из админки)."""
+        try:
+            stat = cfg.index_file.stat()
+        except OSError:
+            return None
+        key = (stat.st_mtime_ns, stat.st_size)
+        if page_cache.get("key") != key:
+            text = cfg.index_file.read_text(encoding="utf-8", errors="replace")
+            page_cache.clear()
+            page_cache.update(key=key, page=(text, seo.read_meta(text), stat.st_mtime))
+        return page_cache["page"]  # type: ignore[return-value]
+
+    def site_base(request: web.Request, meta: seo.PageMeta | None) -> str:
+        """Адрес сайта для robots.txt и sitemap.xml: из админки («Адрес сайта»), иначе PUBLIC_URL, иначе адрес запроса."""
+        if meta is not None and meta.site:
+            return meta.site
+        return cfg.public_url or f"https://{request.host}"
+
+    verify = dict(cfg.search_verify)
+
     async def index(request: web.Request) -> web.StreamResponse:
         if not cfg.index_file.is_file():
             return web.Response(status=503, text="Сайт ещё не загружен: положите index.html в папку site.")
-        return web.FileResponse(cfg.index_file, headers={"Cache-Control": "no-cache"})
+        lang = request.query.get("lang", "")
+        lang = lang if lang in seo.LANGS else seo.LANGS[0]
+        if lang == seo.LANGS[0] and not verify:
+            return web.FileResponse(cfg.index_file, headers={"Cache-Control": "no-cache"})
+        loaded = load_page()
+        if loaded is None:
+            return web.Response(status=503, text="Сайт ещё не загружен: положите index.html в папку site.")
+        page, meta, _ = loaded
+        variant = page_cache.get(lang)
+        if not isinstance(variant, str):
+            variant = page_cache[lang] = seo.localize_page(page, lang, meta, verify)
+        return web.Response(text=variant, content_type="text/html", charset="utf-8", headers={"Cache-Control": "no-cache"})
+
+    async def robots(request: web.Request) -> web.Response:
+        loaded = load_page()
+        text = seo.robots_txt(site_base(request, loaded[1] if loaded else None))
+        return web.Response(text=text, content_type="text/plain", charset="utf-8", headers={"Cache-Control": "public, max-age=3600"})
+
+    async def sitemap(request: web.Request) -> web.Response:
+        loaded = load_page()
+        xml = seo.sitemap_xml(site_base(request, loaded[1] if loaded else None), loaded[2] if loaded else None)
+        return web.Response(text=xml, content_type="application/xml", charset="utf-8", headers={"Cache-Control": "public, max-age=3600"})
 
     async def brand(request: web.Request) -> web.StreamResponse:
         """Логотипы, значки и картинка-превью из site/brand: только плоские имена png/svg/ico, без подпапок."""
@@ -346,6 +391,8 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
     app = web.Application(middlewares=[headers], client_max_size=MAX_PUBLISH_BYTES + 1024)
     app.router.add_get("/", index)
     app.router.add_get("/index.html", index)
+    app.router.add_get("/robots.txt", robots)
+    app.router.add_get("/sitemap.xml", sitemap)
     app.router.add_get("/brand/{name}", brand)
     app.router.add_get("/favicon.ico", brand)
     app.router.add_get("/api/health", health)
