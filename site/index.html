@@ -30,7 +30,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400..800&amp;family=Onest:wght@400..700&amp;family=Literata:opsz,wght@7..72,400..700&amp;family=Manrope:wght@400..800&amp;family=Oswald:wght@400..700&amp;family=Playfair+Display:wght@500..800&amp;family=Asap+Sharp:ital,wght@0,400..700;1,400..700&amp;display=swap" rel="stylesheet">
-<script type="application/ld+json">{"@context":"https://schema.org","@type":"ProfessionalService","name":"Codex Lab","description":"Закажите сайт без догадок о цене и сроках: конструктор соберёт техническое задание за 5 минут и покажет вилку цены. Лендинги, сайты компаний, интернет-магазины, веб-сервисы, Telegram-боты и мобильные приложения.","areaServed":"UZ","address":{"@type":"PostalAddress","addressLocality":"Ташкент","addressCountry":"UZ"},"url":"https://codexlab.uz/","logo":"https://codexlab.uz/brand/logo-for-light.png","image":"https://codexlab.uz/brand/og.png"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://codexlab.uz/#website","url":"https://codexlab.uz/","name":"Codex Lab","alternateName":["codexlab","codexlab.uz"],"inLanguage":["ru","uz","en"],"publisher":{"@id":"https://codexlab.uz/#org"}},{"@type":"ProfessionalService","@id":"https://codexlab.uz/#org","name":"Codex Lab","description":"Закажите сайт без догадок о цене и сроках: конструктор соберёт техническое задание за 5 минут и покажет вилку цены. Лендинги, сайты компаний, интернет-магазины, веб-сервисы, Telegram-боты и мобильные приложения.","areaServed":"UZ","address":{"@type":"PostalAddress","addressLocality":"Ташкент","addressCountry":"UZ"},"knowsLanguage":["ru","uz","en"],"alternateName":["codexlab","codexlab.uz"],"url":"https://codexlab.uz/","logo":"https://codexlab.uz/brand/logo-for-light.png","image":"https://codexlab.uz/brand/og.png"}]}</script>
 <style id="site-css">/* =====================================================================
    VARAQ, версия 2. Концепция «От листа к сайту».
    Бумага — белый, чернила и чертёж — кобальт, печать редактора — сигнальный.
@@ -3861,13 +3861,30 @@ function siteHTML(d) {
 </dialog>`;
 }
 
-/* Разметка для поисковиков: кто мы, где работаем, как связаться. */
+/* Разметка для поисковиков: сайт и студия одним графом — кто мы, где работаем, как связаться.
+   alternateName — как ещё пишут название: одним словом, как на логотипе («codexlab»), и доменом.
+   По ним Google связывает с сайтом запросы вроде «codexlab» и показывает имя сайта в выдаче.
+   sameAs — профили студии: пока это Telegram из «Контактов», если он указан. */
 function ldJSON(d) {
-  const ld = { '@context': 'https://schema.org', '@type': 'ProfessionalService', name: d.brand.name, description: d.texts.seoDescription,
-    areaServed: 'UZ', address: { '@type': 'PostalAddress', addressLocality: d.brand.city, addressCountry: 'UZ' } };
-  if (d.brand.site) Object.assign(ld, { url: d.brand.site + '/', logo: d.brand.site + '/brand/logo-for-light.png', image: d.brand.site + '/brand/og.png' });
-  if (d.contacts.phone) ld.telephone = '+' + digits(d.contacts.phone);
-  if (d.contacts.email) ld.email = d.contacts.email;
+  const name = d.brand.name, site = d.brand.site;
+  const host = site ? site.replace(/^https?:\/\//, '').replace(/[\/:].*$/, '') : '';
+  const alt = [...new Set([name.toLowerCase().replace(/\s+/g, ''), host])].filter((x) => x && x !== name);
+  const org = { '@type': 'ProfessionalService' };
+  if (site) org['@id'] = site + '/#org';
+  Object.assign(org, { name, description: d.texts.seoDescription, areaServed: 'UZ',
+    address: { '@type': 'PostalAddress', addressLocality: d.brand.city, addressCountry: 'UZ' }, knowsLanguage: ['ru', 'uz', 'en'] });
+  if (alt.length) org.alternateName = alt;
+  if (site) Object.assign(org, { url: site + '/', logo: site + '/brand/logo-for-light.png', image: site + '/brand/og.png' });
+  if (d.contacts.phone) org.telephone = '+' + digits(d.contacts.phone);
+  if (d.contacts.email) org.email = d.contacts.email;
+  if (d.contacts.telegram) org.sameAs = ['https://t.me/' + d.contacts.telegram];
+  let ld = { '@context': 'https://schema.org', ...org };
+  if (site) {
+    const web = { '@type': 'WebSite', '@id': site + '/#website', url: site + '/', name };
+    if (alt.length) web.alternateName = alt;
+    Object.assign(web, { inLanguage: ['ru', 'uz', 'en'], publisher: { '@id': site + '/#org' } });
+    ld = { '@context': 'https://schema.org', '@graph': [web, org] };
+  }
   return JSON.stringify(ld).replace(/</g, '\\u003c');
 }
 

@@ -43,6 +43,24 @@ class PageMetaTest(unittest.TestCase):
         self.assertNotIn("noindex", head)
 
 
+class StructuredDataTest(unittest.TestCase):
+    def test_site_and_studio_graph(self) -> None:
+        import json
+        head = SITE.partition("</head>")[0]
+        found = re.search(r'<script type="application/ld\+json">(.*?)</script>', head, re.S)
+        data = json.loads(found.group(1))
+        web, org = data["@graph"]
+        self.assertEqual(web["@type"], "WebSite")
+        self.assertEqual((web["url"], web["name"]), ("https://codexlab.uz/", "Codex Lab"))
+        self.assertEqual(web["alternateName"], ["codexlab", "codexlab.uz"])     # «codexlab» одним словом — как на логотипе
+        self.assertEqual(web["publisher"], {"@id": org["@id"]})
+        self.assertEqual(org["@type"], "ProfessionalService")
+        self.assertEqual(org["@id"], "https://codexlab.uz/#org")
+        self.assertEqual(org["alternateName"], ["codexlab", "codexlab.uz"])
+        self.assertEqual(org["logo"], "https://codexlab.uz/brand/logo-for-light.png")
+        self.assertNotIn("sameAs", org)                                          # Telegram в контактах пока не указан
+
+
 class LocalizeTest(unittest.TestCase):
     def test_uzbek_version_head(self) -> None:
         meta = seo.read_meta(SITE)
