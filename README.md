@@ -203,13 +203,15 @@ sudo systemctl reload caddy
 
 1. Google: откройте [Search Console](https://search.google.com/search-console), добавьте ресурс.
    - «Домен» (`codexlab.uz`) подтверждается записью TXT у регистратора домена — так подтверждаются сразу все адреса.
-   - «Префикс URL» (`https://codexlab.uz/`) — способом «HTML-тег»: скопируйте код из `content="…"` (можно весь тег)
-     в переменную `GOOGLE_SITE_VERIFICATION` (в `.env` или в Environment на Render), перезапустите сервис
-     и нажмите «Подтвердить».
+   - «Префикс URL» (`https://codexlab.uz/`) — способом «HTML-файл»: положите скачанный файл `google….html`
+     в папку `site/verify/` репозитория (сервер отдаёт его из корня сайта), выложите и нажмите «Подтвердить».
+     Для codexlab.uz файл уже лежит там. Или способом «HTML-тег»: код из `content="…"` (можно весь тег) —
+     в переменную `GOOGLE_SITE_VERIFICATION` (в `.env` или в Environment на Render), затем перезапуск сервиса.
 2. В Search Console → «Файлы Sitemap» отправьте `https://codexlab.uz/sitemap.xml`; в «Проверке URL» можно
    запросить индексирование главной страницы.
-3. Яндекс (по желанию): [Вебмастер](https://webmaster.yandex.ru) → добавить сайт → «Мета-тег»,
-   код — в `YANDEX_VERIFICATION`; там же отправьте ту же карту сайта.
+3. Яндекс (по желанию): [Вебмастер](https://webmaster.yandex.ru) → добавить сайт → «Мета-тег»
+   (код — в `YANDEX_VERIFICATION`) или «HTML-файл» (`yandex_….html` — в `site/verify/`); там же отправьте
+   ту же карту сайта.
 
 В выдаче сайт появляется не сразу: обычно от нескольких дней до пары недель.
 
@@ -314,6 +316,7 @@ sudo systemctl reload caddy
 | Логотип и аватар бота | `docs/brand/` (SVG для светлого и тёмного фона, PNG), `docs/bot-avatar.png` |
 | Значки, превью для поиска и мессенджеров | `site/brand/` — сервер отдаёт их по адресам `/brand/…` и `/favicon.ico` |
 | robots.txt, карта сайта, языковые версии для поиска | `app/seo.py` — сервер собирает их из `site/index.html` |
+| Файлы подтверждения для Google и Яндекса | `site/verify/` — сервер отдаёт их из корня сайта |
 | Настройки и пароли | `.env` |
 | Журнал работы | `sudo journalctl -u codexlab -n 100` |
 

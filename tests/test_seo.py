@@ -159,6 +159,24 @@ class ServerSeoTest(unittest.IsolatedAsyncioTestCase):
         client = await self.client(public_url="https://example.uz")
         self.assertIn("Sitemap: https://example.uz/sitemap.xml", await (await client.get("/robots.txt")).text())
 
+    async def test_verification_file(self) -> None:
+        verify = self.root / "site" / "verify"
+        verify.mkdir()
+        (verify / "googleb0b3f0f8668cc8e6.html").write_text("google-site-verification: googleb0b3f0f8668cc8e6.html", encoding="utf-8")
+        (verify / "notes.html").write_text("личное", encoding="utf-8")
+        client = await self.client()
+        found = await client.get("/googleb0b3f0f8668cc8e6.html")
+        self.assertEqual(found.status, 200)
+        self.assertEqual(await found.text(), "google-site-verification: googleb0b3f0f8668cc8e6.html")
+        self.assertTrue(found.headers["Content-Type"].startswith("text/html"))
+        for path in ("/google0000000000000000.html", "/notes.html", "/googleb0b3f0f8668cc8e6.htm", "/verify/googleb0b3f0f8668cc8e6.html",
+                     "/google..%2Fverify%2Fnotes.html", "/yandex_0123456789abcdef.html"):
+            self.assertEqual((await client.get(path)).status, 404, path)
+
+    async def test_repository_has_google_file(self) -> None:
+        name = "googleb0b3f0f8668cc8e6.html"
+        self.assertEqual((ROOT / "site" / "verify" / name).read_text(encoding="utf-8"), f"google-site-verification: {name}")
+
     async def test_verification_codes_on_every_version(self) -> None:
         client = await self.client(search_verify=(("google-site-verification", "abc123_DEF-456"), ("yandex-verification", "0123456789abcdef")))
         for path in ("/", "/?lang=uz"):

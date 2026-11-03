@@ -33,6 +33,8 @@ MAX_PUBLISH_BYTES = 12 * 1024 * 1024
 MAX_TEXT_CHARS = 20_000
 KEEP_BACKUPS = 20
 BRAND_FILE = re.compile(r"[a-z0-9-]{1,40}\.(png|svg|ico)")    # файлы site/brand, которые сервер отдаёт как есть
+# Файлы подтверждения прав на сайт: Google Search Console и Яндекс Вебмастер ищут их в корне сайта
+VERIFY_FILE = r"(?:google[0-9a-f]{16}|yandex_[0-9a-f]{16})\.html"
 PROJECTS = {"landing": "Лендинг", "corp": "Сайт компании", "shop": "Интернет-магазин",
             "app": "Веб-сервис с кабинетом", "bot": "Telegram-бот"}
 CLIENT_ID = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
@@ -276,6 +278,13 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
             raise web.HTTPNotFound()
         return web.FileResponse(path, headers={"Cache-Control": "public, max-age=86400"})
 
+    async def verify_file(request: web.Request) -> web.StreamResponse:
+        """Файл подтверждения из Search Console или Вебмастера: лежит в site/verify, отдаётся из корня как есть."""
+        path = cfg.site_dir / "verify" / request.match_info["name"]
+        if not path.is_file():
+            raise web.HTTPNotFound()
+        return web.FileResponse(path, headers={"Cache-Control": "no-cache", "Content-Type": "text/html; charset=utf-8"})
+
     async def health(request: web.Request) -> web.Response:
         data = {"app": "codexlab-site", "ok": True, "publish": cfg.publish_enabled, "bot": bot_enabled}
         if studio is not None:
@@ -393,6 +402,7 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
     app.router.add_get("/index.html", index)
     app.router.add_get("/robots.txt", robots)
     app.router.add_get("/sitemap.xml", sitemap)
+    app.router.add_get("/{name:" + VERIFY_FILE + "}", verify_file)
     app.router.add_get("/brand/{name}", brand)
     app.router.add_get("/favicon.ico", brand)
     app.router.add_get("/api/health", health)
