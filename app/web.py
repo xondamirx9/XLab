@@ -33,8 +33,9 @@ MAX_PUBLISH_BYTES = 12 * 1024 * 1024
 MAX_TEXT_CHARS = 20_000
 KEEP_BACKUPS = 20
 BRAND_FILE = re.compile(r"[a-z0-9-]{1,40}\.(png|svg|ico)")    # файлы site/brand, которые сервер отдаёт как есть
-# Файлы подтверждения прав на сайт: Google Search Console и Яндекс Вебмастер ищут их в корне сайта
-VERIFY_FILE = r"(?:google[0-9a-f]{16}|yandex_[0-9a-f]{16})\.html"
+# Файлы подтверждения прав на сайт в корне сайта: Google Search Console, Яндекс Вебмастер, Bing и ключ IndexNow
+VERIFY_FILE = r"(?:google[0-9a-f]{16}\.html|yandex_[0-9a-f]{16}\.html|BingSiteAuth\.xml|[0-9a-f]{32}\.txt)"
+VERIFY_TYPES = {".html": "text/html", ".xml": "application/xml", ".txt": "text/plain"}
 PROJECTS = {"landing": "Лендинг", "corp": "Сайт компании", "shop": "Интернет-магазин",
             "app": "Веб-сервис с кабинетом", "bot": "Telegram-бот"}
 CLIENT_ID = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
@@ -203,7 +204,7 @@ def _estimate_text(estimate: object) -> str:
 
 def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
                bot_enabled: bool = False, studio: StudioContext | None = None,
-               rates: RateService | None = None) -> web.Application:
+               rates: RateService | None = None, on_site_changed: Callable[[], None] = lambda: None) -> web.Application:
     order_limit = RateLimiter(limit=5, window=600)        # 5 заявок за 10 минут с одного адреса
     order_total = RateLimiter(limit=120, window=3600)     # и не больше 120 в час со всех адресов
     auth_fails = RateLimiter(limit=5, window=900)         # 5 неверных паролей за 15 минут
@@ -279,11 +280,12 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
         return web.FileResponse(path, headers={"Cache-Control": "public, max-age=86400"})
 
     async def verify_file(request: web.Request) -> web.StreamResponse:
-        """Файл подтверждения из Search Console или Вебмастера: лежит в site/verify, отдаётся из корня как есть."""
+        """Файл подтверждения (Search Console, Вебмастер, Bing) или ключ IndexNow: лежит в site/verify, отдаётся из корня."""
         path = cfg.site_dir / "verify" / request.match_info["name"]
         if not path.is_file():
             raise web.HTTPNotFound()
-        return web.FileResponse(path, headers={"Cache-Control": "no-cache", "Content-Type": "text/html; charset=utf-8"})
+        kind = VERIFY_TYPES[path.suffix]
+        return web.FileResponse(path, headers={"Cache-Control": "no-cache", "Content-Type": f"{kind}; charset=utf-8"})
 
     async def health(request: web.Request) -> web.Response:
         data = {"app": "codexlab-site", "ok": True, "publish": cfg.publish_enabled, "bot": bot_enabled}
@@ -395,6 +397,7 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
 
         backup = _write_site(cfg.index_file, raw)
         log.info("сайт обновлён из админки; прежняя версия: %s", backup.name if backup else "нет")
+        on_site_changed()                     # сообщить поисковикам о новой версии
         return web.json_response({"ok": True})
 
     app = web.Application(middlewares=[headers], client_max_size=MAX_PUBLISH_BYTES + 1024)

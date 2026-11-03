@@ -14,6 +14,7 @@ from aiohttp import web
 
 from app.bot import Notifier, build_dispatcher
 from app.config import Config, ConfigError
+from app.indexnow import IndexNow
 from app.news import Broadcaster, NewsStore
 from app.rates import RateService
 from app.storage import Storage
@@ -52,7 +53,9 @@ async def run(cfg: Config) -> None:
                                    wake_news=broadcaster.wake, claude=cfg.claude_enabled)
         log.info("студия: %s", f"агенты думают через {cfg.studio_model}" if cfg.claude_enabled
                  else "офлайн-режим (нет ANTHROPIC_API_KEY): сайты собираются без нейросети")
-    app = create_app(cfg, storage, on_new_order=notifier.wake, bot_enabled=bot is not None, studio=studio_ctx, rates=rates)
+    indexnow = IndexNow(cfg)              # сообщать Bing и Яндексу о новой версии сайта
+    app = create_app(cfg, storage, on_new_order=notifier.wake, bot_enabled=bot is not None, studio=studio_ctx, rates=rates,
+                     on_site_changed=indexnow.wake)
 
     runner = web.AppRunner(app, access_log=None)
     await runner.setup()
@@ -75,7 +78,8 @@ async def run(cfg: Config) -> None:
         except NotImplementedError:          # Windows: остановка по Ctrl+C через KeyboardInterrupt
             pass
 
-    tasks = [asyncio.create_task(notifier.run(stop)), asyncio.create_task(broadcaster.run(stop))]
+    tasks = [asyncio.create_task(notifier.run(stop)), asyncio.create_task(broadcaster.run(stop)),
+             asyncio.create_task(indexnow.run(stop))]
     if worker is not None:
         tasks.append(asyncio.create_task(worker.run(stop)))
     dispatcher = None
