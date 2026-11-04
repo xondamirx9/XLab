@@ -1214,7 +1214,18 @@ html[data-page="brief"] #brief{padding-top:64px}
 .soon-acts{display:flex;flex-wrap:wrap;gap:12px;margin-top:20px}
 
 /* Меню: текущая страница; на узком экране — кнопка и выпадающий список */
-.nav a[aria-current="page"]{color:var(--ink);text-decoration:underline;text-decoration-color:var(--brand);text-decoration-thickness:2px;text-underline-offset:10px}
+/* Ссылки меню в шапке: при наведении за текстом проявляется мягкая подложка (::before), а под текстом
+   слева направо прорисовывается красно-золотая линия (::after); у открытой страницы линия остаётся.
+   Уводим курсор — линия уходит вправо. При «меньше движения» — без анимации. */
+.top .nav a{position:relative;isolation:isolate;padding:8px 2px;transition:color .25s ease}
+.top .nav a::before{content:"";position:absolute;z-index:-1;inset:2px -12px;border-radius:999px;background:color-mix(in srgb,var(--ink) 9%,transparent);opacity:0;transform:scale(.82);transition:opacity .25s ease,transform .35s cubic-bezier(.2,.8,.2,1)}
+.top .nav a::after{content:"";position:absolute;left:0;right:0;bottom:0;height:2px;border-radius:2px;background:linear-gradient(90deg,var(--brand),var(--gold));transform:scaleX(0);transform-origin:right center;transition:transform .4s cubic-bezier(.2,.8,.2,1)}
+.top .nav a:hover,.top .nav a:focus-visible,.top .nav a[aria-current="page"]{color:var(--ink)}
+.top .nav a:hover::before,.top .nav a:focus-visible::before{opacity:1;transform:scale(1)}
+.top .nav a:hover::after,.top .nav a:focus-visible::after,.top .nav a[aria-current="page"]::after{transform:scaleX(1);transform-origin:left center}
+.top .nav a:focus-visible{outline:none}
+.top.is-menu .nav a::before,.top.is-menu .nav a::after{display:none}   /* в выпадающем меню — свои подложки */
+@media (prefers-reduced-motion:reduce){.top .nav a,.top .nav a::before,.top .nav a::after{transition:none}}
 .nav .nav-m{display:none}
 /* меню — слева, сразу за логотипом; язык, валюта, тема и «Составить ТЗ» — справа */
 .top .logo{margin-right:0}
