@@ -36,7 +36,7 @@ def _path(value: str, default: str) -> Path:
 @dataclass(frozen=True)
 class Config:
     bot_token: str
-    admin_chat_ids: tuple[int, ...]
+    admin_chat_ids: tuple[int, ...]      # чаты, куда приходят заявки и уведомления
     admin_password: str
     host: str
     port: int
@@ -56,10 +56,20 @@ class Config:
     # подтверждение прав на сайт в Google Search Console, Яндекс Вебмастере и Bing: имя тега <meta> → код
     search_verify: tuple[tuple[str, str], ...] = ()
     indexnow: bool = False               # сообщать Bing и Яндексу о новой версии сайта (app/indexnow.py)
+    admin_user_ids: tuple[int, ...] = () # люди-администраторы; личные чаты из admin_chat_ids считаются и так
 
     @property
     def publish_enabled(self) -> bool:
         return len(self.admin_password) >= MIN_PASSWORD_LENGTH
+
+    @property
+    def admin_users(self) -> tuple[int, ...]:
+        """Номера людей-администраторов. У группы номер отрицательный, у личного чата он равен номеру человека."""
+        return tuple(dict.fromkeys((*self.admin_user_ids, *(chat for chat in self.admin_chat_ids if chat > 0))))
+
+    def is_admin(self, chat_id: int, user_id: int | None) -> bool:
+        """Права проверяются у человека: состоять в группе из ADMIN_CHAT_IDS мало, а чужой чат не место для заявок."""
+        return user_id in self.admin_users and (chat_id == user_id or chat_id in self.admin_chat_ids)
 
     @property
     def index_file(self) -> Path:
@@ -70,15 +80,22 @@ class Config:
         load_env_file(ROOT / ".env")
         env = os.environ.get
 
-        ids: list[int] = []
-        for part in env("ADMIN_CHAT_IDS", "").replace(";", ",").split(","):
-            part = part.strip()
-            if not part:
-                continue
-            try:
-                ids.append(int(part))
-            except ValueError as exc:
-                raise ConfigError(f"ADMIN_CHAT_IDS: «{part}» не похоже на номер чата. Нужны числа через запятую.") from exc
+        def id_list(key: str) -> list[int]:
+            found: list[int] = []
+            for part in env(key, "").replace(";", ",").split(","):
+                part = part.strip()
+                if not part:
+                    continue
+                try:
+                    found.append(int(part))
+                except ValueError as exc:
+                    raise ConfigError(f"{key}: «{part}» не похоже на номер. Нужны числа через запятую.") from exc
+            return found
+
+        ids = id_list("ADMIN_CHAT_IDS")
+        user_ids = id_list("ADMIN_USER_IDS")
+        if any(user <= 0 for user in user_ids):
+            raise ConfigError("ADMIN_USER_IDS: нужны номера людей, а не групп. Номер человека положительный: его покажет /id.")
 
         try:
             port = int(env("PORT", "8080"))
@@ -130,6 +147,7 @@ class Config:
         return cls(
             bot_token=env("BOT_TOKEN", "").strip(),
             admin_chat_ids=tuple(dict.fromkeys(ids)),
+            admin_user_ids=tuple(dict.fromkeys(user_ids)),
             admin_password=password,
             host=env("HOST", "127.0.0.1").strip() or "127.0.0.1",
             port=port,

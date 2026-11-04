@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import quote
 
+from aiogram.types import Update
 from aiohttp.test_utils import TestClient, TestServer
 
 from app.bot import build_dispatcher
@@ -438,6 +439,27 @@ class WizardCase(TelegramCase):
         other = await store.add_lesson("copywriter", "Ставить телефон в каждый заголовок", 5, approved=False)
         await dispatcher.feed_update(self.bot, press(5, 111, f"lesson:no:{other}"))
         self.assertEqual([l["id"] for l in await store.all_lessons()], [lesson_id])     # отклонённый урок удалён
+
+    async def test_group_member_cannot_press_admin_buttons(self) -> None:
+        """Кнопку в служебной группе видят все, но нажать её может только администратор."""
+        cfg = make_config(self.root, admin_chat_ids=(-100500,), admin_user_ids=(111,))
+        storage = Storage(self.root / "orders.sqlite3")
+        await storage.init()
+        store = StudioStore(self.root / "studio.sqlite3")
+        await store.init()
+        lesson_id = await store.add_lesson("copywriter", "Писать короче", 5, approved=False)
+        dispatcher = build_dispatcher(cfg, storage, studio_store=store)
+
+        def group_press(update_id: int, user_id: int) -> Update:
+            return Update.model_validate({"update_id": update_id, "callback_query": {
+                "id": str(update_id), "chat_instance": "1", "data": f"lesson:ok:{lesson_id}",
+                "from": {"id": user_id, "is_bot": False, "first_name": "Тест"},
+                "message": {"message_id": 1, "date": 1700000000, "chat": {"id": -100500, "type": "supergroup"}, "text": "…"}}})
+
+        await dispatcher.feed_update(self.bot, group_press(1, 555))
+        self.assertEqual(await store.lessons_for("copywriter"), [])
+        await dispatcher.feed_update(self.bot, group_press(2, 111))
+        self.assertEqual([l["id"] for l in await store.lessons_for("copywriter")], [lesson_id])
 
 
 if __name__ == "__main__":

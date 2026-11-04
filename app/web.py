@@ -205,10 +205,12 @@ def _estimate_text(estimate: object) -> str:
 
 def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
                bot_enabled: bool = False, studio: StudioContext | None = None,
-               rates: RateService | None = None, on_site_changed: Callable[[], None] = lambda: None) -> web.Application:
+               rates: RateService | None = None, on_site_changed: Callable[[], None] = lambda: None,
+               on_admin_action: Callable[[str], None] = lambda text: None) -> web.Application:
     order_limit = RateLimiter(limit=5, window=600)        # 5 заявок за 10 минут с одного адреса
     order_total = RateLimiter(limit=120, window=3600)     # и не больше 120 в час со всех адресов
     auth_fails = RateLimiter(limit=5, window=900)         # 5 неверных паролей за 15 минут
+    auth_total = RateLimiter(limit=30, window=3600)       # и не больше 30 в час со всех адресов: адрес можно подделать
     event_limit = RateLimiter(limit=30, window=600)       # счётчик воронки: до 30 событий за 10 минут с адреса
 
     @web.middleware
@@ -314,13 +316,21 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
         ip = client_ip(request, cfg.trust_proxy, cfg.cloud_proxy)
         if not cfg.publish_enabled:
             return _json_error(403, "Не задан ADMIN_PASSWORD.")
+        # Обе проверки — до сравнения пароля: иначе во время блокировки подбор всё равно отличал бы верный пароль
         if auth_fails.blocked(ip):
             return _json_error(429, "Слишком много попыток. Подождите 15 минут.")
+        if auth_total.blocked("all"):
+            return _json_error(429, "Слишком много попыток со всех адресов. Подождите до часа.")
         scheme, _, token = request.headers.get("Authorization", "").partition(" ")
         password = unquote(token.strip()) if scheme.lower() == "bearer" else ""
         if not hmac.compare_digest(password.encode("utf-8"), cfg.admin_password.encode("utf-8")):
             auth_fails.hit(ip)
-            log.warning("%s: неверный пароль администратора", request.path)
+            auth_total.hit("all")
+            log.warning("%s: неверный пароль администратора, адрес %s", request.path, ip)
+            if auth_total.blocked("all"):
+                log.warning("вход администратора закрыт: слишком много неверных паролей")
+                on_admin_action("🚨 Подбор пароля администратора: 30 неверных попыток за час.\n"
+                                "Вход закрыт примерно на час, с верным паролем тоже. Сайт работает как обычно.")
             return _json_error(401, "Неверный пароль.")
         return None
 
@@ -404,7 +414,12 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
             return _json_error(400, "Это не страница сайта.")
 
         backup = _write_site(cfg.index_file, raw)
-        log.info("сайт обновлён из админки; прежняя версия: %s", backup.name if backup else "нет")
+        ip = client_ip(request, cfg.trust_proxy, cfg.cloud_proxy)
+        previous = backup.name if backup else "нет"
+        digest = hashlib.sha256(raw).hexdigest()[:12]
+        log.info("сайт обновлён из админки: адрес %s, %s байт, sha256 %s; прежняя версия: %s", ip, len(raw), digest, previous)
+        on_admin_action(f"🔐 Сайт опубликован из админки\nАдрес: {ip}\nРазмер: {len(raw)} байт, sha256 {digest}\n"
+                        f"Прежняя версия: {previous}\n\nЕсли это были не вы: смените ADMIN_PASSWORD и верните прежнюю версию.")
         on_site_changed()                     # сообщить поисковикам о новой версии
         return web.json_response({"ok": True})
 
@@ -429,7 +444,7 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
         setup_studio(app, store=studio.store, studio=studio.studio, news=studio.news, sites_dir=studio.sites_dir,
                      check_admin=check_admin, client_ip=lambda request: client_ip(request, cfg.trust_proxy, cfg.cloud_proxy),
                      limiter=lambda limit, window: RateLimiter(limit, window), wake_worker=studio.wake_worker,
-                     wake_news=studio.wake_news)
+                     wake_news=studio.wake_news, on_admin_action=on_admin_action)
     return app
 
 
