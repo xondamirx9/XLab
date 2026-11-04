@@ -66,18 +66,54 @@ class LocalizeTest(unittest.TestCase):
         meta = seo.read_meta(SITE)
         page = seo.localize_page(SITE, "uz", meta)
         head, _, body = page.partition("</head>")
-        self.assertTrue(page.startswith('<!doctype html>\n<html lang="uz">'))
+        self.assertTrue(page.startswith('<!doctype html>\n<html lang="uz" data-page="home">'))
         self.assertIn(f"<title>{meta.titles['uz']}</title>", head)
         self.assertIn('<link rel="canonical" href="https://codexlab.uz/?lang=uz">', head)
         self.assertIn('<meta property="og:url" content="https://codexlab.uz/?lang=uz">', head)
         self.assertEqual(len(re.findall(r'<link rel="canonical"', head)), 1)
-        self.assertEqual(body, SITE.partition("</head>")[2])        # разметка и код страницы не тронуты
-        # ссылки hreflang одинаковые у всех версий
+        # ссылки hreflang у главной — те же, что в шапке файла
         self.assertEqual(re.findall(r'hreflang="[^"]+" href="[^"]+"', head),
                          re.findall(r'hreflang="[^"]+" href="[^"]+"', SITE.partition("</head>")[0]))
 
-    def test_russian_version_unchanged_without_codes(self) -> None:
-        self.assertEqual(seo.localize_page(SITE, "ru", seo.read_meta(SITE)), SITE)
+    def test_settings_and_code_untouched(self) -> None:
+        start = '<script type="application/json" id="site-data">'
+        for name in seo.PAGES:
+            page = seo.localize_page(SITE, "en", seo.read_meta(SITE), page=name)
+            self.assertEqual(page.partition(start)[2], SITE.partition(start)[2], name)
+
+    def test_each_page_keeps_only_its_blocks(self) -> None:
+        meta = seo.read_meta(SITE)
+        expect = {"home": ["top", "value", "examples", "projects", "process", "priceTeaser", "final"],
+                  "examples": ["examplesHead", "examples", "templates", "final"],
+                  "about": ["about", "projects", "process", "faq", "final"],
+                  "prices": ["pricesHead", "prices", "faq", "final"],
+                  "brief": ["briefHead", "brief", "faq"]}
+        for name, ids in expect.items():
+            page = seo.localize_page(SITE, "ru", meta, page=name)
+            markup = page.partition("</head>")[2].partition('<script type="application/json" id="site-data">')[0]
+            found = re.findall(r'<section data-pages="[^"]*" class="[^"]*" id="([^"]+)"', markup)
+            self.assertEqual(found, ids, name)
+            self.assertNotIn("<!--pg:", markup)                     # пометки для сервера посетителю не нужны
+            self.assertIn(f'<html lang="ru" data-page="{name}">', page)
+
+    def test_page_head_per_page_and_language(self) -> None:
+        meta = seo.read_meta(SITE)
+        page = seo.localize_page(SITE, "uz", meta, page="prices")
+        head = page.partition("</head>")[0]
+        self.assertIn(f"<title>{meta.pages['prices']['uz']['t']}</title>", head)
+        self.assertIn("Codex Lab", meta.pages["prices"]["uz"]["t"])
+        self.assertIn('<link rel="canonical" href="https://codexlab.uz/prices?lang=uz">', head)
+        self.assertIn('<meta property="og:url" content="https://codexlab.uz/prices?lang=uz">', head)
+        self.assertEqual(re.findall(r'hreflang="([^"]+)" href="([^"]+)"', head), [
+            ("ru", "https://codexlab.uz/prices"), ("uz", "https://codexlab.uz/prices?lang=uz"),
+            ("en", "https://codexlab.uz/prices?lang=en"), ("x-default", "https://codexlab.uz/prices")])
+        self.assertEqual(set(meta.pages), set(seo.PAGES))
+        for name in seo.PAGES:
+            self.assertEqual(set(meta.pages[name]), set(seo.LANGS), name)
+
+    def test_page_of_path(self) -> None:
+        self.assertEqual([seo.page_of_path(x) for x in ("/", "/index.html", "/prices", "/prices/", "/about", "/brief", "/examples", "/templates", "/nope")],
+                         ["home", "home", "prices", "prices", "about", "brief", "examples", "", ""])
 
     def test_titles_are_escaped(self) -> None:
         page = '<html lang="ru"><head><title>a</title><meta name="description" content="b"></head><body></body></html>'
@@ -108,11 +144,12 @@ class FilesTest(unittest.TestCase):
 
     def test_sitemap(self) -> None:
         xml = seo.sitemap_xml("https://codexlab.uz", 1793664000)   # 2026-11-03 UTC
-        self.assertEqual(xml.count("<url>"), 3)
-        for loc in ("https://codexlab.uz/", "https://codexlab.uz/?lang=uz", "https://codexlab.uz/?lang=en"):
+        self.assertEqual(xml.count("<url>"), 15)                     # пять страниц на трёх языках
+        for loc in ("https://codexlab.uz/", "https://codexlab.uz/?lang=uz", "https://codexlab.uz/prices",
+                    "https://codexlab.uz/about?lang=en", "https://codexlab.uz/examples?lang=uz", "https://codexlab.uz/brief"):
             self.assertIn(f"<loc>{loc}</loc>", xml)
-        self.assertEqual(xml.count("<lastmod>2026-11-03</lastmod>"), 3)
-        self.assertEqual(xml.count('hreflang="x-default"'), 3)
+        self.assertEqual(xml.count("<lastmod>2026-11-03</lastmod>"), 15)
+        self.assertEqual(xml.count('hreflang="x-default"'), 15)
         import xml.etree.ElementTree as ET
         ET.fromstring(xml)                                           # правильный XML
 
@@ -139,23 +176,49 @@ class ServerSeoTest(unittest.IsolatedAsyncioTestCase):
     async def test_language_versions(self) -> None:
         client = await self.client()
         root = await client.get("/")
-        self.assertEqual(await root.text(), SITE)
+        home = await root.text()
+        self.assertIn('<html lang="ru" data-page="home">', home)
+        self.assertNotIn('id="briefHead"', home.partition('<script type="application/json" id="site-data">')[0])
         uz = await client.get("/?lang=uz")
         self.assertEqual(uz.status, 200)
         self.assertEqual(uz.headers["Content-Type"], "text/html; charset=utf-8")
         self.assertIn("frame-ancestors 'none'", uz.headers["Content-Security-Policy"])
         text = await uz.text()
-        self.assertTrue(text.startswith('<!doctype html>\n<html lang="uz">'))
+        self.assertTrue(text.startswith('<!doctype html>\n<html lang="uz" data-page="home">'))
         self.assertIn('<link rel="canonical" href="https://codexlab.uz/?lang=uz">', text)
         en = await (await client.get("/?lang=en")).text()
         self.assertIn('<link rel="canonical" href="https://codexlab.uz/?lang=en">', en)
         for odd in ("/?lang=ru", "/?lang=de", "/?lang=%3Cscript%3E"):
-            self.assertEqual(await (await client.get(odd)).text(), SITE, odd)
+            self.assertEqual(await (await client.get(odd)).text(), home, odd)
+
+    async def test_page_addresses(self) -> None:
+        client = await self.client()
+        for name, path in seo.PAGES.items():
+            response = await client.get(path)
+            self.assertEqual(response.status, 200, path)
+            text = await response.text()
+            self.assertIn(f'data-page="{name}"', text.partition("<head>")[0], path)
+            canonical = "https://codexlab.uz" + path
+            self.assertIn(f'<link rel="canonical" href="{canonical}">', text, path)
+        about_uz = await (await client.get("/about?lang=uz")).text()
+        self.assertIn('<link rel="canonical" href="https://codexlab.uz/about?lang=uz">', about_uz)
+        moved = await client.get("/prices/?lang=en", allow_redirects=False)
+        self.assertEqual((moved.status, moved.headers["Location"]), (301, "/prices?lang=en"))
+        self.assertEqual((await client.get("/pricing")).status, 404)
+
+    async def test_etag(self) -> None:
+        client = await self.client()
+        first = await client.get("/about")
+        etag = first.headers["ETag"]
+        again = await client.get("/about", headers={"If-None-Match": etag})
+        self.assertEqual(again.status, 304)
+        other = await client.get("/prices", headers={"If-None-Match": etag})
+        self.assertEqual(other.status, 200)
 
     async def test_page_change_is_picked_up(self) -> None:
         client = await self.client()
         await client.get("/?lang=en")
-        changed = SITE.replace('"seoTitle":"Codex Lab — website and Telegram bot development, Tashkent"', '"seoTitle":"New English title"')
+        changed = SITE.replace('Codex Lab — website and Telegram bot development, Tashkent', 'New English title')
         self.assertNotEqual(changed, SITE)
         path = self.root / "site" / "index.html"
         path.write_text(changed, encoding="utf-8")

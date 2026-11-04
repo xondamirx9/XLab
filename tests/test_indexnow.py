@@ -61,9 +61,11 @@ class KeyTest(unittest.TestCase):
         self.assertRegex(key, r"^[0-9a-f]{32}$")
 
     def test_payload(self) -> None:
-        self.assertEqual(indexnow.payload("https://codexlab.uz", KEY), {
-            "host": "codexlab.uz", "key": KEY, "keyLocation": f"https://codexlab.uz/{KEY}.txt",
-            "urlList": ["https://codexlab.uz/", "https://codexlab.uz/?lang=uz", "https://codexlab.uz/?lang=en"]})
+        data = indexnow.payload("https://codexlab.uz", KEY)
+        self.assertEqual((data["host"], data["key"], data["keyLocation"]), ("codexlab.uz", KEY, f"https://codexlab.uz/{KEY}.txt"))
+        self.assertEqual(len(data["urlList"]), 15)                   # пять страниц на трёх языках
+        for url in ("https://codexlab.uz/", "https://codexlab.uz/?lang=uz", "https://codexlab.uz/prices", "https://codexlab.uz/about?lang=en"):
+            self.assertIn(url, data["urlList"])
 
 
 class IndexNowCase(unittest.IsolatedAsyncioTestCase):

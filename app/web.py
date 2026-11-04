@@ -1,6 +1,7 @@
 """HTTP-часть: сайт, приём заявок, публикация новой версии сайта из админки."""
 from __future__ import annotations
 
+import hashlib
 import hmac
 import ipaddress
 import json
@@ -222,7 +223,7 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
             response.headers.setdefault(key, value)
         return response
 
-    page_cache: dict[str, object] = {}
+    page_cache: dict[object, object] = {}
 
     def load_page() -> tuple[str, seo.PageMeta, float] | None:
         """Страница и её настройки для поисковиков. Перечитывается, когда файл изменился (публикация из админки)."""
@@ -246,20 +247,26 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
     verify = dict(cfg.search_verify)
 
     async def index(request: web.Request) -> web.StreamResponse:
-        if not cfg.index_file.is_file():
-            return web.Response(status=503, text="Сайт ещё не загружен: положите index.html в папку site.")
+        """Страница сайта на языке: «/», «/examples», «/prices», «/about», «/brief» и «?lang=uz|en».
+        Один файл site/index.html; по адресу остаются только блоки этой страницы (app/seo.py)."""
+        name = seo.page_of_path(request.path)
+        if request.path not in ("/", "/index.html") and request.path.endswith("/"):
+            raise web.HTTPMovedPermanently(seo.PAGES[name] + (f"?{request.query_string}" if request.query_string else ""))
         lang = request.query.get("lang", "")
         lang = lang if lang in seo.LANGS else seo.LANGS[0]
-        if lang == seo.LANGS[0] and not verify:
-            return web.FileResponse(cfg.index_file, headers={"Cache-Control": "no-cache"})
         loaded = load_page()
         if loaded is None:
             return web.Response(status=503, text="Сайт ещё не загружен: положите index.html в папку site.")
         page, meta, _ = loaded
-        variant = page_cache.get(lang)
-        if not isinstance(variant, str):
-            variant = page_cache[lang] = seo.localize_page(page, lang, meta, verify)
-        return web.Response(text=variant, content_type="text/html", charset="utf-8", headers={"Cache-Control": "no-cache"})
+        variant = page_cache.get((name, lang))
+        if not isinstance(variant, tuple):
+            body = seo.localize_page(page, lang, meta, verify, name).encode("utf-8")
+            variant = page_cache[(name, lang)] = (body, '"' + hashlib.sha256(body).hexdigest()[:32] + '"')
+        body, etag = variant
+        headers = {"Cache-Control": "no-cache", "ETag": etag}
+        if etag in request.headers.get("If-None-Match", ""):    # страница не менялась — браузер берёт свою копию
+            return web.Response(status=304, headers=headers)
+        return web.Response(body=body, content_type="text/html", charset="utf-8", headers=headers)
 
     async def robots(request: web.Request) -> web.Response:
         loaded = load_page()
@@ -403,6 +410,10 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
     app = web.Application(middlewares=[headers], client_max_size=MAX_PUBLISH_BYTES + 1024)
     app.router.add_get("/", index)
     app.router.add_get("/index.html", index)
+    for path in seo.PAGES.values():          # страницы сайта; «/prices/» ведёт на «/prices»
+        if path != "/":
+            app.router.add_get(path, index)
+            app.router.add_get(path + "/", index)
     app.router.add_get("/robots.txt", robots)
     app.router.add_get("/sitemap.xml", sitemap)
     app.router.add_get("/{name:" + VERIFY_FILE + "}", verify_file)
