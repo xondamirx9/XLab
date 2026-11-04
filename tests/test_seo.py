@@ -86,7 +86,7 @@ class LocalizeTest(unittest.TestCase):
         expect = {"home": ["top", "value", "examples", "projects", "process", "priceTeaser", "final"],
                   "examples": ["examplesHead", "examples", "templates", "final"],
                   "about": ["about", "projects", "process", "faq", "final"],
-                  "partners": ["partnersHead", "final"],
+                  "partners": ["partnersHead", "partnerList", "final"],
                   "prices": ["pricesHead", "prices", "faq", "final"],
                   "brief": ["briefHead", "brief", "faq"]}
         for name, ids in expect.items():
@@ -116,12 +116,24 @@ class LocalizeTest(unittest.TestCase):
         self.assertEqual([seo.page_of_path(x) for x in ("/", "/index.html", "/prices", "/prices/", "/about", "/brief", "/examples", "/partners", "/templates", "/nope")],
                          ["home", "home", "prices", "prices", "about", "brief", "examples", "partners", "", ""])
 
-    def test_empty_partners_page_is_hidden_from_search(self) -> None:
+    def test_partners_page_is_in_search(self) -> None:
         meta = seo.read_meta(SITE)
+        self.assertEqual(meta.hidden, frozenset())                  # на «Партнёрах» — NOIZ Media и SavdEx
+        page = seo.localize_page(SITE, "ru", meta, page="partners")
+        self.assertIn('<meta name="robots" content="index, follow, max-image-preview:large">', page.partition("</head>")[0])
+        for name in ("NOIZ Media", "SavdEx", 'href="https://noizmedia.uz/"', 'href="https://savdex.uz/"'):
+            self.assertIn(name, page.partition("</head>")[2])
+        xml = seo.sitemap_xml("https://codexlab.uz", None, meta.hidden)
+        self.assertIn("<loc>https://codexlab.uz/partners?lang=en</loc>", xml)
+        self.assertEqual(xml.count("<url>"), 18)                     # шесть страниц на трёх языках
+
+    def test_empty_page_is_hidden_from_search(self) -> None:
+        site = SITE.replace('"partners":{"ru":', '"partners":{"soon":1,"ru":', 1)   # пометка soon: страница пока пустая
+        meta = seo.read_meta(site)
         self.assertEqual(meta.hidden, frozenset({"partners"}))
-        head = seo.localize_page(SITE, "ru", meta, page="partners").partition("</head>")[0]
+        head = seo.localize_page(site, "ru", meta, page="partners").partition("</head>")[0]
         self.assertIn('<meta name="robots" content="noindex, follow">', head)
-        other = seo.localize_page(SITE, "ru", meta, page="about").partition("</head>")[0]
+        other = seo.localize_page(site, "ru", meta, page="about").partition("</head>")[0]
         self.assertIn('<meta name="robots" content="index, follow, max-image-preview:large">', other)
         xml = seo.sitemap_xml("https://codexlab.uz", None, meta.hidden)
         self.assertNotIn("/partners", xml)
@@ -155,13 +167,13 @@ class FilesTest(unittest.TestCase):
         self.assertIn("Sitemap: https://codexlab.uz/sitemap.xml\n", text)
 
     def test_sitemap(self) -> None:
-        xml = seo.sitemap_xml("https://codexlab.uz", 1793664000, {"partners"})   # 2026-11-03 UTC; «Партнёры» пока пустые
-        self.assertEqual(xml.count("<url>"), 15)                     # пять страниц на трёх языках
+        xml = seo.sitemap_xml("https://codexlab.uz", 1793664000)   # 2026-11-03 UTC
+        self.assertEqual(xml.count("<url>"), 18)                     # шесть страниц на трёх языках
         for loc in ("https://codexlab.uz/", "https://codexlab.uz/?lang=uz", "https://codexlab.uz/prices",
-                    "https://codexlab.uz/about?lang=en", "https://codexlab.uz/examples?lang=uz", "https://codexlab.uz/brief"):
+                    "https://codexlab.uz/about?lang=en", "https://codexlab.uz/examples?lang=uz", "https://codexlab.uz/partners", "https://codexlab.uz/brief"):
             self.assertIn(f"<loc>{loc}</loc>", xml)
-        self.assertEqual(xml.count("<lastmod>2026-11-03</lastmod>"), 15)
-        self.assertEqual(xml.count('hreflang="x-default"'), 15)
+        self.assertEqual(xml.count("<lastmod>2026-11-03</lastmod>"), 18)
+        self.assertEqual(xml.count('hreflang="x-default"'), 18)
         import xml.etree.ElementTree as ET
         ET.fromstring(xml)                                           # правильный XML
 
