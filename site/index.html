@@ -493,7 +493,9 @@ textarea.in{min-height:96px;resize:vertical}
 
 /* ---------- Свет на первом экране ---------- */
 .hero::before{display:none}
-.aurora{position:absolute;inset:0;z-index:-1;overflow:hidden;pointer-events:none}
+.aurora{position:absolute;inset:0;z-index:-1;overflow:hidden;pointer-events:none;
+  /* размытые пятна гаснут к нижнему краю первого экрана: иначе край блока обрезал их ровной полосой */
+  -webkit-mask-image:linear-gradient(180deg,#000 45%,transparent 92%);mask-image:linear-gradient(180deg,#000 45%,transparent 92%)}
 .aurora i{position:absolute;border-radius:50%;filter:blur(72px);will-change:transform}
 .aurora i:nth-child(1){width:580px;height:580px;right:2%;top:-16%;background:#C8141F;opacity:.5;animation:drift1 18s ease-in-out infinite alternate}
 .aurora i:nth-child(2){width:420px;height:420px;right:30%;top:38%;background:#E8A917;opacity:.2;animation:drift2 23s ease-in-out infinite alternate}
