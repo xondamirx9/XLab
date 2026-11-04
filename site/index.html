@@ -1138,8 +1138,8 @@ select.a-in{appearance:auto}
 }
 
 /* =====================================================================
-   СВЕТЛАЯ ТЕМА. Шапка, первый экран и подвал — светлые; примеры, конструктор
-   и тёмные карточки остаются ночными полосами. Тёмная тема — блоки выше.
+   СВЕТЛАЯ ТЕМА — светлое всё, без исключений: шапка, первый экран с голограммой,
+   примеры, конструктор, тёмные карточки и подвал. Тёмная тема — блоки выше.
    ===================================================================== */
 :root[data-theme="light"] .top{--bg:#FFFFFF;--ink:#15151A;--muted:#5E5E68;--line:#E4E4EA;--brand-text:#A50F18;color:#15151A}
 :root[data-theme="light"] .top-in{background:rgba(255,255,255,.86);border-color:rgba(21,21,26,.1)}
@@ -1153,7 +1153,7 @@ select.a-in{appearance:auto}
 :root[data-theme="light"] .pick-menu button[aria-checked="true"] b{color:var(--brand-text)}
 :root[data-theme="light"] .pick-menu button[aria-checked="true"]::after{background:var(--brand)}
 
-/* Первый экран днём: светлый фон, тёплое свечение; сцена и карточка ассистента — тёмное стекло, как ночью */
+/* Первый экран днём: светлый фон, тёплое свечение; сцена, выноски и карточка ассистента — светлое стекло */
 :root[data-theme="light"] .hero{--bg:#FFFFFF;--bg2:#F4F4F6;--ink:#15151A;--muted:#5E5E68;--line:#DCDCE3;--brand-text:#A50F18;--brand-soft:#FBE9EA;background:#F4F4F6;color:#15151A}
 :root[data-theme="light"] .hero::after{background-image:radial-gradient(rgba(21,21,26,.1) 1px,transparent 1.5px)}
 :root[data-theme="light"] .aurora i:nth-child(1){opacity:.16}
@@ -1164,17 +1164,66 @@ select.a-in{appearance:auto}
 :root[data-theme="light"] .hero .chip[aria-pressed="true"]{background:var(--brand);border-color:var(--brand);box-shadow:0 10px 26px -12px var(--brand)}
 :root[data-theme="light"] .layer--shadow{background:rgba(200,20,31,.2)}
 :root[data-theme="light"] .hud-read{color:#0E7490}
-:root[data-theme="light"] .hero-card{color:var(--on-night)}   /* карточка ассистента — тёмное стекло и днём */
 :root[data-theme="light"] .scene::before,:root[data-theme="light"] .scene::after{border-color:var(--brand)}
 
 /* Подвал днём */
 :root[data-theme="light"] .foot{background:#F4F4F6;color:#5E5E68;border-top:1px solid #E4E4EA}
-/* Днём светлые блоки, первый экран и подвал — один белый лист без стыков; примеры и конструктор
-   остаются ночными полосами */
-:root[data-theme="light"] :is(.hero,.sec:not(.sec--night),.foot){background:transparent}
+/* Днём все блоки, первый экран и подвал — один белый лист без стыков */
+:root[data-theme="light"] :is(.hero,.sec,.brief,.foot){background:transparent}
+:root[data-theme="light"] :is(.sec--night,.brief)::before,:root[data-theme="light"] .brief::after{display:none}
 :root[data-theme="light"] .foot{border-top:0}
 :root[data-theme="light"] .foot a{color:#15151A}
 :root[data-theme="light"]{--fw-ink:#15151A;--fw-red:#B3121B;--fw-top:.1;--fw-bottom:.015}
+
+/* Ночные цвета днём — светлые: у примеров, конструктора, тёмных карточек и голограммы первого экрана.
+   Голубой голограммы днём темнее — иначе на белом не прочитать. */
+:root[data-theme="light"] :is(.sec--night,.brief,.tile--a,.plan--note,.hero-card,.hw,.tag){--night:#FFFFFF;--night2:#FFFFFF;--on-night:#15151A;--night-muted:#5E5E68;--night-line:#E4E4EA}
+:root[data-theme="light"] :is(.hero,.sec--night,.brief){--holo:#0E7490}
+
+/* Примеры сайтов днём */
+:root[data-theme="light"] .sec--night button.ex:hover{background:rgba(21,21,26,.04)}
+:root[data-theme="light"] .sec--night button.ex[aria-pressed="true"]{box-shadow:0 14px 30px -22px rgba(10,15,31,.5)}
+:root[data-theme="light"] .sec--night button.ex .ex-type{color:var(--accent-text)}
+:root[data-theme="light"] .sec--night .browser-bar{background:#F4F4F6}
+:root[data-theme="light"] .sec--night .browser-bar i{background:#C9C9D2}
+:root[data-theme="light"] .sec--night .browser-bar span{background:#FFFFFF;color:var(--muted)}
+:root[data-theme="light"] .sec--night :focus-visible{outline-color:var(--brand)}
+
+/* Плитка «ТЗ за пять минут» и пометка под тарифами днём */
+:root[data-theme="light"] .tile--a{background:var(--bg2)}
+:root[data-theme="light"] .ticks li{background:#FFFFFF}
+:root[data-theme="light"] :is(.ticks,.plan--note) .ic{color:var(--accent)}
+:root[data-theme="light"] :is(.plan--note,.plan--note:hover){background:var(--bg2);border-color:var(--line)}
+/* белые кнопки ночных блоков днём — красные, как остальные главные кнопки */
+:root[data-theme="light"] :is(.plan--note,.brief) .btn--light{background:var(--brand);color:var(--brand-ink);box-shadow:inset 0 0 0 1px rgba(242,182,60,.38)}
+:root[data-theme="light"] :is(.plan--note,.brief) .btn--light:hover{box-shadow:inset 0 0 0 1px rgba(242,182,60,.7),0 12px 26px -12px var(--brand)}
+:root[data-theme="light"] :is(.tile--a,.plan--note).glow::after{background:radial-gradient(440px circle at var(--mx,50%) var(--my,50%),rgba(232,169,23,.16),transparent 62%)}
+
+/* Конструктор ТЗ днём */
+:root[data-theme="light"] .panel{box-shadow:0 30px 60px -44px rgba(21,21,26,.3)}
+:root[data-theme="light"] .prog button[aria-current="step"]{border-color:#15151A;color:#15151A}
+:root[data-theme="light"] .in{background:#FFFFFF}
+:root[data-theme="light"] :is(.in:hover,.opt:hover span){border-color:#B9B9C4}
+:root[data-theme="light"] :is(.in:focus-visible,.opt input:focus-visible+span){outline-color:var(--brand)}
+:root[data-theme="light"] .opts--cards .ic{background:#F4F4F6}
+:root[data-theme="light"] .consent input{accent-color:var(--brand)}
+:root[data-theme="light"] :is(.err,.est .warn){color:#9A6700}
+:root[data-theme="light"] :is(.est b,.done-sum b){color:var(--accent-text);text-shadow:none}
+:root[data-theme="light"] .sheet{box-shadow:0 40px 80px -44px rgba(21,21,26,.35),0 0 0 1px rgba(21,21,26,.06)}
+
+/* Голограмма первого экрана днём: светлое стекло с голубой кромкой */
+:root[data-theme="light"] .tag{background:rgba(255,255,255,.92);border-color:rgba(14,116,144,.35);box-shadow:0 10px 24px -14px rgba(21,21,26,.3)}
+:root[data-theme="light"] .hero-card{background:rgba(255,255,255,.9);border-color:rgba(14,116,144,.3);box-shadow:0 30px 60px -34px rgba(21,21,26,.35),0 0 40px -22px rgba(8,145,178,.55),inset 0 0 30px rgba(127,231,255,.12)}
+:root[data-theme="light"] .is-ready .hero-card{box-shadow:0 30px 60px -34px rgba(21,21,26,.35),0 0 48px -16px rgba(18,138,75,.45),inset 0 0 30px rgba(95,208,143,.1)}
+:root[data-theme="light"] .ai-head{border-bottom-color:rgba(14,116,144,.2)}
+:root[data-theme="light"] .hero-card .hc-inc{border-top-color:rgba(14,116,144,.16)}
+:root[data-theme="light"] .hero-card .total{color:var(--accent-text);text-shadow:none}
+:root[data-theme="light"] .hw{background:rgba(255,255,255,.94);border-color:rgba(14,116,144,.4);box-shadow:0 14px 30px -18px rgba(21,21,26,.3),0 0 26px -12px rgba(8,145,178,.5),inset 0 0 20px rgba(127,231,255,.12)}
+:root[data-theme="light"] .hw-sw i{border-color:rgba(21,21,26,.14)}
+:root[data-theme="light"] .hw-bar{background:rgba(14,116,144,.14)}
+:root[data-theme="light"] .layer--wire{background:linear-gradient(135deg,rgba(240,252,255,.95),rgba(222,245,251,.96));border-color:rgba(14,116,144,.38);box-shadow:0 0 60px rgba(127,231,255,.35),inset 0 0 30px rgba(127,231,255,.18)}
+:root[data-theme="light"] .layer--wire svg g{stroke:#0E7490}
+:root[data-theme="light"] .layer--site{box-shadow:0 24px 50px -14px rgba(10,15,31,.3),0 0 40px -10px rgba(127,231,255,.45)}
 
 /* Плитка «Три языка»: RU / UZ / EN в одну строку и на планшете */
 .tile-big{white-space:nowrap}
