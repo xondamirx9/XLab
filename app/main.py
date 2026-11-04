@@ -47,7 +47,7 @@ async def run(cfg: Config) -> None:
         await studio_store.init()
         sites_dir = cfg.data_dir / "sites"
         llm = LLMFactory(model=cfg.studio_model, max_calls=cfg.studio_max_calls, enabled=cfg.claude_enabled)
-        studio = Studio(studio_store, llm, sites_dir, debate_rounds=cfg.debate_rounds, trusted_chats=cfg.admin_chat_ids)
+        studio = Studio(studio_store, llm, sites_dir, debate_rounds=cfg.debate_rounds, trusted_chats=cfg.admin_users)
         worker = StudioWorker(studio, studio_store, bot, cfg.public_url, cfg.studio_concurrency)
         studio_ctx = StudioContext(store=studio_store, studio=studio, news=news, sites_dir=sites_dir, wake_worker=worker.wake,
                                    wake_news=broadcaster.wake, claude=cfg.claude_enabled)
@@ -55,7 +55,7 @@ async def run(cfg: Config) -> None:
                  else "офлайн-режим (нет ANTHROPIC_API_KEY): сайты собираются без нейросети")
     indexnow = IndexNow(cfg)              # сообщать Bing и Яндексу о новой версии сайта
     app = create_app(cfg, storage, on_new_order=notifier.wake, bot_enabled=bot is not None, studio=studio_ctx, rates=rates,
-                     on_site_changed=indexnow.wake)
+                     on_site_changed=indexnow.wake, on_admin_action=notifier.alert)
 
     runner = web.AppRunner(app, access_log=None)
     await runner.setup()
@@ -65,6 +65,8 @@ async def run(cfg: Config) -> None:
         log.warning("BOT_TOKEN не задан: заявки сохраняются, но в Telegram не пересылаются")
     elif not cfg.admin_chat_ids:
         log.warning("ADMIN_CHAT_IDS пуст: напишите боту /start, он покажет номер чата")
+    if any(chat < 0 for chat in cfg.admin_chat_ids) and not cfg.admin_users:
+        log.warning("в ADMIN_CHAT_IDS есть группа, а ADMIN_USER_IDS пуст: заявки в группу придут, но управлять ботом из неё никто не сможет")
     if not cfg.publish_enabled:
         log.warning("ADMIN_PASSWORD не задан: публикация из админки выключена")
     if cfg.cloud_proxy:

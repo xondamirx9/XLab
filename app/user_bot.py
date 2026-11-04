@@ -9,7 +9,7 @@ from aiogram import F, Router
 from aiogram.filters import Command, CommandObject, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, User
 
 from app.config import Config
 from app.news import NewsStore, news_markup, news_text
@@ -88,7 +88,8 @@ def brief_summary(data: dict) -> str:
 def build_user_router(cfg: Config, *, news: NewsStore | None, store: StudioStore | None, studio: Studio | None,
                       wake_worker: Callable[[], None], wake_news: Callable[[], None]) -> Router:
     router = Router()
-    is_admin = lambda chat_id: chat_id in cfg.admin_chat_ids
+    # Человека берём из апдейта: у нажатия кнопки это callback.from_user, а callback.message.from_user — сам бот
+    is_admin = lambda chat_id, user: cfg.is_admin(chat_id, user.id if user else None)
     launching: set[int] = set()                      # чаты, чей заказ сайта прямо сейчас запускается
 
     # ---------- новости ----------
@@ -127,7 +128,7 @@ def build_user_router(cfg: Config, *, news: NewsStore | None, store: StudioStore
     @router.message(Command("post"))
     async def post(message: Message, command: CommandObject) -> None:
         """Администратор: /post Заголовок, с новой строки — текст. Можно прислать фото с такой подписью."""
-        if not is_admin(message.chat.id) or news is None:
+        if not is_admin(message.chat.id, message.from_user) or news is None:
             return
         raw = (command.args or "").strip()
         if not raw:
@@ -147,18 +148,18 @@ def build_user_router(cfg: Config, *, news: NewsStore | None, store: StudioStore
 
     @router.message(Command("subscribers"))
     async def subscribers(message: Message) -> None:
-        if not is_admin(message.chat.id) or news is None:
+        if not is_admin(message.chat.id, message.from_user) or news is None:
             return
         active, total = await news.counts()
         await message.answer(f"Подписаны на новости: {active}\nВсего запускали бота: {total}")
 
     # ---------- заказ сайта ----------
-    async def start_order(message: Message, state: FSMContext, chat_id: int) -> None:
+    async def start_order(message: Message, state: FSMContext, chat_id: int, user: User | None) -> None:
         if store is None:
             await message.answer("Студия сайтов сейчас выключена.")
             return
         # Здесь лимит проверяется, чтобы не гонять человека по анкете зря; окончательно — при запуске (confirm).
-        if not is_admin(chat_id) and (cfg.studio_daily_limit == 0 or await store.count_since(chat_id, day_ago()) >= cfg.studio_daily_limit):
+        if not is_admin(chat_id, user) and (cfg.studio_daily_limit == 0 or await store.count_since(chat_id, day_ago()) >= cfg.studio_daily_limit):
             await message.answer(LIMIT_TEXT)
             return
         await state.clear()
@@ -169,13 +170,13 @@ def build_user_router(cfg: Config, *, news: NewsStore | None, store: StudioStore
 
     @router.message(Command("site"))
     async def site_cmd(message: Message, state: FSMContext) -> None:
-        await start_order(message, state, message.chat.id)
+        await start_order(message, state, message.chat.id, message.from_user)
 
     @router.callback_query(F.data == "site:new")
     async def site_cb(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer()
         if isinstance(callback.message, Message):
-            await start_order(callback.message, state, callback.message.chat.id)
+            await start_order(callback.message, state, callback.message.chat.id, callback.from_user)
 
     @router.message(Command("cancel"))
     async def cancel(message: Message, state: FSMContext) -> None:
@@ -299,7 +300,7 @@ def build_user_router(cfg: Config, *, news: NewsStore | None, store: StudioStore
             brief = {"business": data.get("business", ""), "niche": data.get("niche", ""), "description": data.get("description", ""),
                      "style": data.get("style", ""), "colors": data.get("colors", ""), "lang": data.get("lang", "ru"),
                      "city": "", "contacts": data.get("contacts") or {}}
-            if is_admin(chat_id):
+            if is_admin(chat_id, callback.from_user):
                 project = await store.create_project(brief, slugify(brief["business"]), chat_id=chat_id)
             else:
                 project = await store.create_within_limit(brief, slugify(brief["business"]), chat_id, day_ago(), cfg.studio_daily_limit)
@@ -319,9 +320,9 @@ def build_user_router(cfg: Config, *, news: NewsStore | None, store: StudioStore
         await callback.message.answer(text, reply_markup=markup)
 
     # ---------- после сдачи: оценка и правки ----------
-    async def own_project(chat_id: int, project_id: int):
+    async def own_project(chat_id: int, user: User | None, project_id: int):
         project = await store.get(project_id) if store else None
-        if project is None or (project.chat_id != chat_id and not is_admin(chat_id)):
+        if project is None or (project.chat_id != chat_id and not is_admin(chat_id, user)):
             return None
         return project
 
@@ -336,7 +337,7 @@ def build_user_router(cfg: Config, *, news: NewsStore | None, store: StudioStore
         except ValueError:
             await callback.answer()
             return
-        project = await own_project(callback.message.chat.id, project_id)
+        project = await own_project(callback.message.chat.id, callback.from_user, project_id)
         if project is None or not 1 <= rating <= 5:
             await callback.answer("Проект не найден")
             return
@@ -358,7 +359,7 @@ def build_user_router(cfg: Config, *, news: NewsStore | None, store: StudioStore
             project_id = int((callback.data or "").split(":")[1])
         except ValueError:
             return
-        project = await own_project(callback.message.chat.id, project_id)
+        project = await own_project(callback.message.chat.id, callback.from_user, project_id)
         if project is None:
             return
         await state.set_state(Order.revise)
@@ -369,11 +370,11 @@ def build_user_router(cfg: Config, *, news: NewsStore | None, store: StudioStore
     async def got_revision(message: Message, state: FSMContext) -> None:
         data = await state.get_data()
         await state.clear()
-        project = await own_project(message.chat.id, int(data.get("project_id", 0)))
+        project = await own_project(message.chat.id, message.from_user, int(data.get("project_id", 0)))
         if project is None or store is None:
             await message.answer("Проект не найден.")
             return
-        if project.version >= MAX_REVISIONS and not is_admin(message.chat.id):
+        if project.version >= MAX_REVISIONS and not is_admin(message.chat.id, message.from_user):
             await message.answer("Лимит правок для этого сайта исчерпан. Напишите нам — доработаем вручную.")
             return
         text = " ".join((message.text or "").split())[:1500]
@@ -410,7 +411,7 @@ def build_user_router(cfg: Config, *, news: NewsStore | None, store: StudioStore
     # ---------- администратору ----------
     @router.message(Command("studio"))
     async def studio_list(message: Message) -> None:
-        if not is_admin(message.chat.id) or store is None:
+        if not is_admin(message.chat.id, message.from_user) or store is None:
             return
         projects = await store.list_projects(8)
         if not projects:
@@ -423,7 +424,7 @@ def build_user_router(cfg: Config, *, news: NewsStore | None, store: StudioStore
 
     @router.message(Command("lessons"))
     async def lessons(message: Message) -> None:
-        if not is_admin(message.chat.id) or store is None:
+        if not is_admin(message.chat.id, message.from_user) or store is None:
             return
         items = [l for l in await store.all_lessons(10) if l["active"] and l["approved"]]
         waiting = await store.unapproved_lessons(10)
@@ -439,7 +440,7 @@ def build_user_router(cfg: Config, *, news: NewsStore | None, store: StudioStore
 
     @router.callback_query(F.data.startswith("lesson:"))
     async def review_lesson(callback: CallbackQuery) -> None:
-        if store is None or not isinstance(callback.message, Message) or not is_admin(callback.message.chat.id):
+        if store is None or not isinstance(callback.message, Message) or not is_admin(callback.message.chat.id, callback.from_user):
             await callback.answer()
             return
         try:
