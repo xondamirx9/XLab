@@ -86,6 +86,7 @@ class LocalizeTest(unittest.TestCase):
         expect = {"home": ["top", "value", "examples", "projects", "process", "priceTeaser", "final"],
                   "examples": ["examplesHead", "examples", "templates", "final"],
                   "about": ["about", "projects", "process", "faq", "final"],
+                  "partners": ["partnersHead", "final"],
                   "prices": ["pricesHead", "prices", "faq", "final"],
                   "brief": ["briefHead", "brief", "faq"]}
         for name, ids in expect.items():
@@ -112,8 +113,19 @@ class LocalizeTest(unittest.TestCase):
             self.assertEqual(set(meta.pages[name]), set(seo.LANGS), name)
 
     def test_page_of_path(self) -> None:
-        self.assertEqual([seo.page_of_path(x) for x in ("/", "/index.html", "/prices", "/prices/", "/about", "/brief", "/examples", "/templates", "/nope")],
-                         ["home", "home", "prices", "prices", "about", "brief", "examples", "", ""])
+        self.assertEqual([seo.page_of_path(x) for x in ("/", "/index.html", "/prices", "/prices/", "/about", "/brief", "/examples", "/partners", "/templates", "/nope")],
+                         ["home", "home", "prices", "prices", "about", "brief", "examples", "partners", "", ""])
+
+    def test_empty_partners_page_is_hidden_from_search(self) -> None:
+        meta = seo.read_meta(SITE)
+        self.assertEqual(meta.hidden, frozenset({"partners"}))
+        head = seo.localize_page(SITE, "ru", meta, page="partners").partition("</head>")[0]
+        self.assertIn('<meta name="robots" content="noindex, follow">', head)
+        other = seo.localize_page(SITE, "ru", meta, page="about").partition("</head>")[0]
+        self.assertIn('<meta name="robots" content="index, follow, max-image-preview:large">', other)
+        xml = seo.sitemap_xml("https://codexlab.uz", None, meta.hidden)
+        self.assertNotIn("/partners", xml)
+        self.assertEqual(xml.count("<url>"), 15)
 
     def test_titles_are_escaped(self) -> None:
         page = '<html lang="ru"><head><title>a</title><meta name="description" content="b"></head><body></body></html>'
@@ -143,7 +155,7 @@ class FilesTest(unittest.TestCase):
         self.assertIn("Sitemap: https://codexlab.uz/sitemap.xml\n", text)
 
     def test_sitemap(self) -> None:
-        xml = seo.sitemap_xml("https://codexlab.uz", 1793664000)   # 2026-11-03 UTC
+        xml = seo.sitemap_xml("https://codexlab.uz", 1793664000, {"partners"})   # 2026-11-03 UTC; «Партнёры» пока пустые
         self.assertEqual(xml.count("<url>"), 15)                     # пять страниц на трёх языках
         for loc in ("https://codexlab.uz/", "https://codexlab.uz/?lang=uz", "https://codexlab.uz/prices",
                     "https://codexlab.uz/about?lang=en", "https://codexlab.uz/examples?lang=uz", "https://codexlab.uz/brief"):
