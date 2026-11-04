@@ -83,7 +83,7 @@ class LocalizeTest(unittest.TestCase):
 
     def test_each_page_keeps_only_its_blocks(self) -> None:
         meta = seo.read_meta(SITE)
-        expect = {"home": ["top", "value", "tpls", "projects", "process", "priceTeaser", "final"],
+        expect = {"home": ["top", "value", "examples", "projects", "process", "priceTeaser", "final"],
                   "examples": ["examplesHead", "examples", "final"],
                   "templates": ["templatesHead"],
                   "about": ["about", "projects", "process", "faq", "final"],
