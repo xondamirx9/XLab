@@ -37,13 +37,25 @@ SITE_DATA = re.compile(r'<script type="application/json" id="site-data">(.*?)</s
 # ---------- Цены: по умолчанию те же, что на сайте; настоящие читаются из site/index.html ----------
 DEFAULT_PRICING: dict = {
     "currency": "млн сум",
-    "types": {"landing": {"price": [3, 9], "weeks": [1, 2]}, "corp": {"price": [7, 22], "weeks": [2, 4]},
-              "shop": {"price": [15, 50], "weeks": [3, 8]}, "app": {"price": [25, 90], "weeks": [5, 14]},
-              "bot": {"price": [2.5, 12], "weeks": [1, 3]}},
-    "features": {"form": [0.3, 1], "tg": [0.3, 1], "pay": [2, 6], "catalog": [3, 9], "cart": [2, 6], "account": [5, 15],
-                 "booking": [2, 7], "admin": [1.5, 5], "blog": [1, 3], "crm": [4, 12], "chat": [0.3, 1.5], "map": [0.2, 0.8],
-                 "notify": [1, 4], "analytics": [0.3, 1], "seo": [1, 3]},
-    "mods": {"page": [0.4, 1.2], "lang": [10, 20], "rush": [20, 30], "brand": [1.5, 5], "content": [1, 4], "contentPart": [0.5, 2]},
+    "types": {
+              "landing": {"price": [3, 7], "weeks": [1, 2]},
+              "corp": {"price": [7, 22], "weeks": [2, 4]},
+              "shop": {"price": [20, 50], "weeks": [3, 8]},
+              "app": {"price": [25, 90], "weeks": [5, 14]},
+              "bot": {"price": [2, 12], "weeks": [1, 3]},
+              "mobile": {"price": [15, 30], "weeks": [4, 8]},
+              "miniapp": {"price": [6, 18], "weeks": [2, 5]},
+              "edu": {"price": [15, 40], "weeks": [4, 10]},
+              "market": {"price": [40, 120], "weeks": [8, 20]},
+              "ai": {"price": [5, 20], "weeks": [2, 5]},
+              "integr": {"price": [3, 15], "weeks": [1, 4]},
+              "redesign": {"price": [4, 15], "weeks": [2, 5]}},
+    "features": {"form": [0.3, 0.8], "tg": [0.3, 0.8], "pay": [2, 5], "catalog": [3, 7], "cart": [2, 5], "account": [5, 12],
+                 "booking": [2, 5], "admin": [1.5, 4], "blog": [1, 2.5], "crm": [4, 10], "chat": [0.3, 1], "map": [0.2, 0.6],
+                 "notify": [1, 3], "analytics": [0.3, 0.8], "seo": [1, 2.5], "stores": [1.5, 3], "api": [2, 5], "push": [1, 2.5],
+                 "offline": [2, 5], "smslogin": [0.8, 2], "tgauth": [0.5, 1.2], "courses": [5, 12], "sellers": [8, 20], "aikb": [3, 8],
+                 "migrate": [1, 3]},
+    "mods": {"page": [0.4, 1], "lang": [10, 20], "rush": [20, 30], "brand": [1.5, 4], "content": [1, 3], "contentPart": [0.5, 1.5]},
 }
 
 # ---------- Справочники: подписи на трёх языках, состав и формулировки ТЗ — как на сайте ----------
@@ -64,12 +76,78 @@ TYPES: dict[str, dict] = {
             "hint": ("Регистрация, личный кабинет, своя логика", "Ro‘yxatdan o‘tish, shaxsiy kabinet, o‘ziga xos mantiq", "Sign-up, user account, custom logic"),
             "pages": ["Главная", "Регистрация и вход", "Личный кабинет", "Тарифы", "Помощь", "Панель администратора"],
             "features": ["account", "admin", "notify", "analytics"]},
-    "bot": {"icon": "🤖", "label": ("Telegram-бот", "Telegram-bot", "Telegram bot"),
+    "bot": {"icon": "🤖", "kind": "bot", "label": ("Telegram-бот", "Telegram-bot", "Telegram bot"),
             "hint": ("Заявки, запись или продажи прямо в Telegram", "Arizalar, navbatga yozilish yoki savdo — to‘g‘ridan-to‘g‘ri Telegramda",
                      "Leads, bookings or sales right inside Telegram"),
             "pages": ["Приветствие и меню", "Основной сценарий", "Уведомления администратору", "Команды администратора"],
             "features": ["admin", "notify"]},
+    "mobile": {"icon": "📱", "kind": "mobile", "ask": "app", "label": ("Мобильное приложение", "Mobil ilova", "Mobile app"),
+               "hint": ("iOS и Android к вашему готовому сайту", "Tayyor saytingiz uchun iOS va Android ilova", "iOS and Android apps for your existing website"),
+               "pages": ["Вход и регистрация", "Главный экран", "Каталог или услуги", "Карточка товара или услуги", "Корзина и оплата",
+                         "Профиль и история", "Уведомления"],
+               "features": ["stores", "api", "push", "account"]},
+    "miniapp": {"icon": "📲", "ask": "app", "label": ("Мини-приложение в Telegram", "Telegram mini-ilovasi", "Telegram mini app"),
+                "hint": ("Каталог, запись или заказы внутри Telegram", "Katalog, yozilish yoki buyurtmalar Telegram ichida",
+                         "Catalogue, bookings or orders inside Telegram"),
+                "pages": ["Главный экран", "Каталог или услуги", "Корзина или запись", "Мои заказы", "Профиль"],
+                "features": ["tgauth", "admin", "notify"],
+                "thing": "мини-приложение", "struct": "Экраны мини-приложения", "unit": (("экран", "экрана", "экранов"), "ekran", "screen"),
+                "reqs": ["Мини-приложение открывается из Telegram на iOS, Android и компьютере без установки.",
+                         "Пользователь входит через Telegram, без пароля и регистрации.",
+                         "Первый экран загружается не дольше 2 секунд на мобильном интернете."]},
+    "edu": {"icon": "🎓", "label": ("Онлайн-школа", "Onlayn maktab", "Online school"),
+            "hint": ("Курсы, уроки, тесты и оплата обучения", "Kurslar, darslar, testlar va o‘qish uchun to‘lov", "Courses, lessons, tests and tuition payments"),
+            "pages": ["Главная", "Каталог курсов", "Страница курса", "Уроки и тесты", "Кабинет ученика", "Кабинет преподавателя"],
+            "features": ["courses", "account", "pay", "admin"]},
+    "market": {"icon": "🏬", "label": ("Маркетплейс", "Marketpleys", "Marketplace"),
+               "hint": ("Много продавцов, общая витрина и комиссия", "Ko‘p sotuvchi, umumiy vitrina va komissiya", "Many sellers, one storefront and a commission"),
+               "pages": ["Главная", "Каталог", "Карточка товара", "Страница продавца", "Корзина и оформление", "Кабинет покупателя", "Кабинет продавца"],
+               "features": ["catalog", "cart", "pay", "account", "sellers", "admin"]},
+    "ai": {"icon": "✨", "kind": "bot", "ask": "project", "label": ("ИИ-ассистент", "SI-assistent", "AI assistant"),
+           "hint": ("Отвечает клиентам на сайте и в Telegram круглосуточно", "Mijozlarga saytda va Telegramda kecha-kunduz javob beradi",
+                    "Answers customers on your site and in Telegram around the clock"),
+           "pages": ["Приветствие и меню", "Ответы на частые вопросы", "Подбор товара или услуги", "Передача менеджеру", "Отчёт по диалогам"],
+           "features": ["aikb", "notify"], "thing": "ассистент", "struct": "Сценарии ассистента",
+           "reqs": ["Ассистент отвечает за несколько секунд; если ответа нет в базе знаний, зовёт менеджера, а не выдумывает.",
+                    "Диалоги сохраняются: администратор видит историю и частые вопросы.",
+                    "Персональные данные клиентов не передаются третьим лицам."]},
+    "integr": {"icon": "🔗", "kind": "bot", "ask": "project", "label": ("Интеграции и автоматизация", "Integratsiya va avtomatlashtirish", "Integrations and automation"),
+               "hint": ("1С, CRM, оплата и Telegram в одной связке", "1C, CRM, to‘lov va Telegram bitta tizimda", "1C, CRM, payments and Telegram working together"),
+               "pages": ["Откуда и куда идут данные", "Расписание и события", "Журнал и ошибки", "Уведомления о сбоях"],
+               "features": ["crm", "api"], "thing": "интеграция", "struct": "Сценарии интеграции",
+               "reqs": ["Данные передаются автоматически, без ручного копирования.",
+                        "При сбое связи данные не теряются: передача повторяется, ошибки видны в журнале.",
+                        "Доступы к системам хранятся в защищённом виде."]},
+    "redesign": {"icon": "🎨", "label": ("Редизайн сайта", "Sayt redizayni", "Website redesign"),
+                 "hint": ("Новый вид и удобство для сайта, который уже есть", "Mavjud sayt uchun yangi ko‘rinish va qulaylik",
+                          "A new look and better usability for your current site"),
+                 "pages": ["Главная", "Внутренние страницы", "Каталог или услуги", "Контакты"],
+                 "features": ["migrate", "form", "analytics"]},
 }
+
+# Вид проекта: сайт, бот (сценарии; без логотипа, фото и домена) или мобильное приложение. Слова ТЗ — по виду, у типа могут быть свои.
+KINDS: dict[str, dict] = {
+    "site": {"thing": "сайт", "struct": "Структура сайта", "unit": (("раздел", "раздела", "разделов"), "bo‘lim", "section"), "flag": "web",
+             "reqs": ["Сайт корректно отображается на телефонах от 360 px, планшетах и компьютерах.",
+                      "Первый экран загружается не дольше 2,5 секунды на мобильном интернете.",
+                      "Сайт работает по HTTPS; формы защищены от спама."]},
+    "bot": {"thing": "бот", "struct": "Сценарии бота", "unit": (("сценарий", "сценария", "сценариев"), "ssenariy", "scenario"), "flag": "bot",
+            "reqs": ["Бот отвечает на действие пользователя не дольше 2 секунд.", "Диалоги не теряются при перезапуске бота.",
+                     "Команды администратора доступны только администраторам."]},
+    "mobile": {"thing": "приложение", "struct": "Экраны приложения", "unit": (("экран", "экрана", "экранов"), "ekran", "screen"), "flag": "mob",
+               "reqs": ["Приложение работает на iOS 15+ и Android 8+, на телефонах и планшетах.",
+                        "Приложение и сайт используют общую базу: товары, заказы и пользователи синхронизированы.",
+                        "Приложение не падает при плохой связи и бережёт заряд батареи."]},
+}
+
+
+def kind_of(key: str | None) -> str:
+    return TYPES[key].get("kind", "site") if key in TYPES else "site"
+
+
+def kind_word(key: str | None, name: str):
+    """Слово для ТЗ и вопросов: своё у типа или общее для его вида."""
+    return TYPES[key].get(name, KINDS[kind_of(key)][name]) if key in TYPES else KINDS["site"][name]
 
 # w — надбавка к сроку (недели); web/bot — где функция доступна; doc и req — строка в ТЗ для студии.
 FEATURES: dict[str, dict] = {
@@ -77,32 +155,52 @@ FEATURES: dict[str, dict] = {
              "req": "Посетитель отправляет заявку через форму; заявка сохраняется, даже если уведомление не доставлено."},
     "tg": {"w": 0, "web": 1, "bot": 0, "label": ("Заявки в Telegram", "Arizalar Telegramga", "Leads to Telegram"),
            "req": "Каждая заявка дублируется администратору в Telegram в течение минуты."},
-    "pay": {"w": 0.5, "web": 1, "bot": 1, "label": ("Онлайн-оплата (Click, Payme, Uzum)", "Onlayn to‘lov (Click, Payme, Uzum)", "Online payment (Click, Payme, Uzum)"),
+    "pay": {"w": 0.5, "web": 1, "bot": 1, "mob": 1, "label": ("Онлайн-оплата (Click, Payme, Uzum)", "Onlayn to‘lov (Click, Payme, Uzum)", "Online payment (Click, Payme, Uzum)"),
             "req": "Клиент оплачивает заказ онлайн; статус оплаты виден администратору."},
-    "catalog": {"w": 1, "web": 1, "bot": 1, "label": ("Каталог с фильтрами и поиском", "Filtr va qidiruvli katalog", "Catalogue with filters and search"),
+    "catalog": {"w": 1, "web": 1, "bot": 1, "mob": 1, "label": ("Каталог с фильтрами и поиском", "Filtr va qidiruvli katalog", "Catalogue with filters and search"),
                 "req": "Клиент находит товар через категории, фильтры и поиск по названию."},
-    "cart": {"w": 0.5, "web": 1, "bot": 1, "label": ("Корзина и оформление заказа", "Savat va buyurtmani rasmiylashtirish", "Cart and checkout"),
+    "cart": {"w": 0.5, "web": 1, "bot": 1, "mob": 1, "label": ("Корзина и оформление заказа", "Savat va buyurtmani rasmiylashtirish", "Cart and checkout"),
              "req": "Клиент добавляет товары в корзину и оформляет заказ без регистрации."},
-    "account": {"w": 2, "web": 1, "bot": 0, "label": ("Личный кабинет", "Shaxsiy kabinet", "User account"),
+    "account": {"w": 2, "web": 1, "bot": 0, "mob": 1, "label": ("Личный кабинет", "Shaxsiy kabinet", "User account"),
                 "req": "Пользователь регистрируется, входит в кабинет и видит свои данные и историю."},
-    "booking": {"w": 1, "web": 1, "bot": 1, "label": ("Онлайн-запись или бронирование", "Onlayn yozilish yoki bron qilish", "Online booking or reservations"),
+    "booking": {"w": 1, "web": 1, "bot": 1, "mob": 1, "label": ("Онлайн-запись или бронирование", "Onlayn yozilish yoki bron qilish", "Online booking or reservations"),
                 "req": "Клиент выбирает свободное время и записывается; занятое время недоступно другим."},
-    "admin": {"w": 0.5, "web": 1, "bot": 1, "label": ("Админ-панель", "Admin-panel", "Admin panel"),
+    "admin": {"w": 0.5, "web": 1, "bot": 1, "mob": 1, "label": ("Админ-панель", "Admin-panel", "Admin panel"),
               "req": "Администратор сам меняет тексты, фото и цены, без участия программиста."},
     "blog": {"w": 0.5, "web": 1, "bot": 0, "label": ("Блог или новости", "Blog yoki yangiliklar", "Blog or news"),
              "req": "Администратор публикует новости или статьи; у каждой публикации своя страница."},
-    "crm": {"w": 1.5, "web": 1, "bot": 1, "label": ("Интеграция с CRM или 1С", "CRM yoki 1C bilan integratsiya", "CRM or 1C integration"),
+    "crm": {"w": 1.5, "web": 1, "bot": 1, "mob": 1, "label": ("Интеграция с CRM или 1С", "CRM yoki 1C bilan integratsiya", "CRM or 1C integration"),
             "req": "Заявки и заказы автоматически передаются в CRM или 1С заказчика."},
-    "chat": {"w": 0, "web": 1, "bot": 0, "label": ("Онлайн-чат", "Onlayn chat", "Live chat"),
+    "chat": {"w": 0, "web": 1, "bot": 0, "mob": 1, "label": ("Онлайн-чат", "Onlayn chat", "Live chat"),
              "req": "Посетитель задаёт вопрос в онлайн-чате; оператор отвечает из одного окна."},
-    "map": {"w": 0, "web": 1, "bot": 0, "label": ("Карта и адреса", "Xarita va manzillar", "Map and addresses"),
+    "map": {"w": 0, "web": 1, "bot": 0, "mob": 1, "label": ("Карта и адреса", "Xarita va manzillar", "Map and addresses"),
             "req": "На странице контактов есть карта с адресами и кнопкой построения маршрута."},
-    "notify": {"w": 0.5, "web": 1, "bot": 1, "label": ("Уведомления: SMS, почта, Telegram", "Bildirishnomalar: SMS, pochta, Telegram", "Notifications: SMS, email, Telegram"),
+    "notify": {"w": 0.5, "web": 1, "bot": 1, "mob": 1, "label": ("Уведомления: SMS, почта, Telegram", "Bildirishnomalar: SMS, pochta, Telegram", "Notifications: SMS, email, Telegram"),
                "req": "Клиент и администратор получают уведомления о заявке, оплате и смене статуса."},
-    "analytics": {"w": 0, "web": 1, "bot": 0, "label": ("Аналитика и цели", "Analitika va maqsadlar", "Analytics and goals"),
+    "analytics": {"w": 0, "web": 1, "bot": 0, "mob": 1, "label": ("Аналитика и цели", "Analitika va maqsadlar", "Analytics and goals"),
                   "req": "Подключены Яндекс Метрика и Google Analytics; настроены цели на заявку и заказ."},
     "seo": {"w": 0.5, "web": 1, "bot": 0, "label": ("Базовое SEO", "Asosiy SEO", "Basic SEO"),
             "req": "У каждой страницы свои заголовок и описание для поисковиков, есть sitemap.xml и robots.txt."},
+    "stores": {"w": 0.5, "web": 0, "bot": 0, "mob": 1, "label": ("Публикация в Google Play и App Store", "Google Play va App Store’ga joylash", "Publishing to Google Play and the App Store"),
+               "req": "Приложение опубликовано в Google Play и App Store на аккаунт заказчика; проверку магазинов проходит студия."},
+    "api": {"w": 1, "web": 1, "bot": 1, "mob": 1, "label": ("Связка с вашим сайтом и базой", "Saytingiz va bazangiz bilan bog‘lash", "Connection to your website and database"),
+            "req": "Приложение работает с той же базой, что и сайт: товары, заказы и пользователи общие."},
+    "push": {"w": 0.5, "web": 0, "bot": 0, "mob": 1, "label": ("Push-уведомления", "Push-bildirishnomalar", "Push notifications"),
+             "req": "Пользователь получает push-уведомления о заказах, акциях и смене статуса."},
+    "offline": {"w": 1, "web": 0, "bot": 0, "mob": 1, "label": ("Работа без интернета", "Internetsiz ishlash", "Offline mode"),
+                "req": "Основные экраны открываются без интернета; данные синхронизируются, когда связь появится."},
+    "smslogin": {"w": 0.5, "web": 1, "bot": 0, "mob": 1, "label": ("Вход по номеру телефона (SMS)", "Telefon raqami orqali kirish (SMS)", "Sign-in with a phone number (SMS)"),
+                 "req": "Пользователь входит по номеру телефона и коду из SMS."},
+    "tgauth": {"w": 0, "web": 1, "bot": 0, "mob": 0, "label": ("Вход через Telegram", "Telegram orqali kirish", "Sign-in with Telegram"),
+               "req": "Пользователь входит через Telegram в одно касание, без пароля."},
+    "courses": {"w": 2, "web": 1, "bot": 0, "mob": 1, "label": ("Курсы, уроки и тесты", "Kurslar, darslar va testlar", "Courses, lessons and tests"),
+                "req": "Ученик проходит уроки по порядку, сдаёт тесты и видит свой прогресс; преподаватель проверяет задания."},
+    "sellers": {"w": 3, "web": 1, "bot": 0, "mob": 0, "label": ("Кабинеты продавцов и комиссия", "Sotuvchilar kabinetlari va komissiya", "Seller accounts and commission"),
+                "req": "Продавцы сами добавляют товары и видят свои заказы; площадка удерживает комиссию с каждой продажи."},
+    "aikb": {"w": 1, "web": 1, "bot": 1, "mob": 0, "label": ("Ответы ИИ по вашей базе знаний", "Bilimlar bazangiz bo‘yicha SI javoblari", "AI answers from your knowledge base"),
+             "req": "Ассистент отвечает по вашим документам, прайсу и вопросам-ответам; сложные вопросы передаёт менеджеру."},
+    "migrate": {"w": 0.5, "web": 1, "bot": 0, "mob": 0, "label": ("Перенос сайта без потери позиций в поиске", "Qidiruvdagi o‘rinni yo‘qotmasdan saytni ko‘chirish", "Migration without losing search rankings"),
+                "req": "Страницы и тексты старого сайта перенесены; со старых адресов настроены переадресации 301."},
 }
 
 GOALS = {"lead": ("Получать заявки и звонки", "Ariza va qo‘ng‘iroqlar olish", "Get requests and calls"),
@@ -130,13 +228,13 @@ UNKNOWN_BUDGET = ("Не знаю, подскажите", "Bilmayman, maslahat be
 T: dict[str, tuple[str, str, str]] = {
     "welcome": (
         "Здравствуйте! Это бот студии {brand} — делаем сайты и Telegram-ботов.\n\n"
-        "💰 Тарифы — цены на лендинг, сайт компании, магазин, веб-сервис и бота: в сумах или в долларах по курсу NBU.\n"
+        "💰 Тарифы — цены на сайты, магазины, веб-сервисы, ботов, мобильные приложения и ещё 6 направлений: в сумах или в долларах по курсу NBU.\n"
         "📝 Конструктор ТЗ — ответьте на несколько вопросов, и я соберу техническое задание с вилкой цены и передам его студии.",
         "Assalomu alaykum! Bu {brand} studiyasining boti — saytlar va Telegram-botlar yaratamiz.\n\n"
-        "💰 Tariflar — lending, kompaniya sayti, internet-do‘kon, veb-servis va bot narxlari: so‘mda yoki NBU kursi bo‘yicha dollarda.\n"
+        "💰 Tariflar — saytlar, do‘konlar, veb-servislar, botlar, mobil ilovalar va yana 6 ta yo‘nalish narxlari: so‘mda yoki NBU kursi bo‘yicha dollarda.\n"
         "📝 TZ konstruktori — bir nechta savolga javob bering, men narx oralig‘i bilan texnik topshiriq tuzib, studiyaga yuboraman.",
         "Hello! This is the {brand} studio bot — we build websites and Telegram bots.\n\n"
-        "💰 Pricing — prices for a landing page, company website, online store, web app and bot, in UZS or in US dollars at the NBU rate.\n"
+        "💰 Pricing — websites, online stores, web apps, bots, mobile apps and 6 more services, in UZS or in US dollars at the NBU rate.\n"
         "📝 Brief builder — answer a few questions and I’ll put together a project brief with a price range and pass it to the studio."),
     "welcome_studio": ("🎨 Сайт от ИИ-агентов — 20 агентов соберут для вас готовый сайт.",
                        "🎨 AI-agentlardan sayt — 20 ta agent siz uchun tayyor sayt yig‘adi.",
@@ -185,6 +283,12 @@ T: dict[str, tuple[str, str, str]] = {
     "ask_goals_bot": ("Зачем нужен бот? Можно выбрать несколько, затем нажмите «Дальше».",
                       "Bot nima uchun kerak? Bir nechtasini tanlab, «Davom etish»ni bosing.",
                       "What is the bot for? Pick any, then tap “Next”."),
+    "ask_goals_app": ("Зачем нужно приложение? Можно выбрать несколько, затем нажмите «Дальше».",
+                      "Ilova nima uchun kerak? Bir nechtasini tanlab, «Davom etish»ni bosing.",
+                      "What is the app for? Pick any, then tap “Next”."),
+    "ask_goals_project": ("Какие задачи решает проект? Можно выбрать несколько, затем нажмите «Дальше».",
+                          "Loyiha qanday vazifalarni hal qiladi? Bir nechtasini tanlab, «Davom etish»ni bosing.",
+                          "What should the project achieve? Pick any, then tap “Next”."),
     "ask_features": ("Какие функции нужны? Типовой набор уже отмечен — уберите лишнее, добавьте своё.\n\n💰 Ориентир сейчас: {estimate}",
                      "Qaysi funksiyalar kerak? Odatdagi to‘plam belgilab qo‘yilgan — ortiqchasini olib tashlang, o‘zingiznikini qo‘shing.\n\n💰 Hozirgi taxmin: {estimate}",
                      "Which features do you need? The standard set is already ticked — remove what you don’t need and add your own.\n\n💰 Current estimate: {estimate}"),
@@ -194,6 +298,12 @@ T: dict[str, tuple[str, str, str]] = {
     "ask_langs_bot": ("На каких языках будет бот? Каждый дополнительный язык добавляет к цене.",
                       "Bot qaysi tillarda bo‘ladi? Har bir qo‘shimcha til narxni oshiradi.",
                       "Which languages will the bot speak? Each extra language adds to the price."),
+    "ask_langs_app": ("На каких языках будет приложение? Каждый дополнительный язык добавляет к цене.",
+                      "Ilova qaysi tillarda bo‘ladi? Har bir qo‘shimcha til narxni oshiradi.",
+                      "Which languages will the app be in? Each extra language adds to the price."),
+    "ask_langs_project": ("На каких языках будут общаться с клиентами? Каждый дополнительный язык добавляет к цене.",
+                          "Mijozlar bilan qaysi tillarda muloqot qilinadi? Har bir qo‘shimcha til narxni oshiradi.",
+                          "Which languages will it use with customers? Each extra language adds to the price."),
     "ask_brand": ("Есть логотип и фирменный стиль?", "Logotip va firma uslubi bormi?", "Do you have a logo and brand identity?"),
     "ask_content": ("Тексты и фото готовы?", "Matn va suratlar tayyormi?", "Are the copy and photos ready?"),
     "ask_deadline": ("Когда нужен запуск?", "Qachon ishga tushirish kerak?", "When do you need to launch?"),
@@ -360,7 +470,7 @@ def estimate(brief: dict, pricing: dict) -> dict | None:
     extra_langs = max(0, len(brief.get("langs") or ["ru"]) - 1)
     lo *= 1 + extra_langs * mods["lang"][0] / 100
     hi *= 1 + extra_langs * mods["lang"][1] / 100
-    if kind != "bot":
+    if kind_of(kind) != "bot":                 # логотип и тексты нужны сайту и приложению, боту — нет
         if brief.get("brand") == "none":
             lo, hi, wh = lo + mods["brand"][0], hi + mods["brand"][1], wh + 1
         if brief.get("content") == "none":
@@ -448,7 +558,9 @@ def budget_label(key: str, lang: str, cur: str, rate: Rate | None) -> str:
 # ---------- ТЗ для студии (всегда по-русски: его читают администраторы) ----------
 def open_questions(brief: dict, est: dict | None) -> list[str]:
     """То, что студии предстоит уточнить: пропущенные ответы и решения, которые зависят от клиента."""
-    kind, is_bot = brief.get("type"), brief.get("type") == "bot"
+    kind = brief.get("type")
+    view = kind_of(kind)
+    is_bot = view == "bot"
     out = []
     if not brief.get("company"):
         out.append("Название компании или проекта")
@@ -456,14 +568,17 @@ def open_questions(brief: dict, est: dict | None) -> list[str]:
         out.append("Коротко описать бизнес: что продаёте и кому")
     out.append("Кто целевой клиент")
     if not brief.get("goals"):
-        out.append(f"Какие задачи решает {'бот' if is_bot else 'сайт'}")
+        out.append(f"Какие задачи решает {kind_word(kind, 'thing')}")
     out.append("Какое одно действие должен совершить посетитель")
     if not is_bot:
         if not brief.get("brand"):
             out.append("Есть ли логотип и фирменный стиль")
         if not brief.get("content"):
             out.append("Кто готовит тексты и фото")
-        out.append("Есть ли домен и хостинг")
+        if view == "site":
+            out.append("Есть ли домен и хостинг")
+        else:
+            out.append("Аккаунты разработчика в Google Play и App Store: оформить на компанию")
     if not brief.get("deadline"):
         out.append("Желаемый срок запуска")
     if not brief.get("budget"):
@@ -490,7 +605,7 @@ def open_questions(brief: dict, est: dict | None) -> list[str]:
 def brief_doc(brief: dict, pricing: dict, rate: Rate | None, cur: str) -> str:
     """Текст ТЗ того же вида, что собирает сайт: так заявки из бота и с сайта читаются одинаково."""
     kind = TYPES[brief["type"]]
-    is_bot = brief["type"] == "bot"
+    is_bot = kind_of(brief["type"]) == "bot"
     est = estimate(brief, pricing)
     ru = lambda pair: pair[0]
     pick = lambda table, key: ru(table[key]) if key in table else "уточним вместе"
@@ -500,16 +615,12 @@ def brief_doc(brief: dict, pricing: dict, rate: Rate | None, cur: str) -> str:
            f"Дата: {datetime.now(TASHKENT).strftime('%d.%m.%Y')}", "Источник: Telegram-бот",
            "", "1. Цель и контекст", f"Проект: {ru(kind['label'])}", f"Компания: {brief.get('company') or 'уточним вместе'}",
            f"Чем занимается: {brief.get('about') or 'уточним вместе'}", f"Задачи: {goals}",
-           "", f"2. {'Сценарии бота' if is_bot else 'Структура сайта'}", *[f"- {page}" for page in kind["pages"]],
+           "", f"2. {kind_word(brief['type'], 'struct')}", *[f"- {page}" for page in kind["pages"]],
            "", "3. Функциональные требования"]
     reqs = [FEATURES[k]["req"] for k in brief.get("features", []) if k in FEATURES]
     out += [f"ФТ-{i}. {req}" for i, req in enumerate(reqs, 1)] or ["Список функций предложит студия"]
     out += ["", "4. Общие требования"]
-    out += (["- Бот отвечает на действие пользователя не дольше 2 секунд.", "- Диалоги не теряются при перезапуске бота.",
-             "- Команды администратора доступны только администраторам."] if is_bot else
-            ["- Сайт корректно отображается на телефонах от 360 px, планшетах и компьютерах.",
-             "- Первый экран загружается не дольше 2,5 секунды на мобильном интернете.",
-             "- Сайт работает по HTTPS; формы защищены от спама."])
+    out += [f"- {req}" for req in kind_word(brief["type"], "reqs")]
     out.append(f"- Языки: {langs}.")
     section = 5
     if not is_bot:
@@ -539,6 +650,11 @@ def estimate_line(est: dict) -> str:
 
 
 # ---------- Клавиатуры ----------
+def pairs(buttons: list[tuple[str, str]]) -> list[list[tuple[str, str]]]:
+    """Кнопки по две в ряд: двенадцать тарифов не растягивают сообщение на весь экран."""
+    return [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
+
+
 def kb(rows: list[list[tuple[str, str]]]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=text, callback_data=data) for text, data in row] for row in rows])
 
@@ -586,7 +702,7 @@ SKIP_WORDS = {pair.lower() for pair in T["btn_skip"]}
 
 def steps_for(kind: str) -> list[str]:
     """Боту не нужны логотип и фото: эти шаги пропускаем, как на сайте."""
-    return [s for s in ORDER if not (kind == "bot" and s in ("brand", "content"))]
+    return [s for s in ORDER if not (kind_of(kind) == "bot" and s in ("brand", "content"))]
 
 
 def build_brief_router(cfg_admins: tuple[int, ...], storage: Storage, pricing: SitePricing, prefs: ChatPrefs, *,
@@ -617,7 +733,7 @@ def build_brief_router(cfg_admins: tuple[int, ...], storage: Storage, pricing: S
         if cur == "usd":
             text += "\n\n" + rate_text(rate, lang)
         text += "\n\n" + t("prices_pick", lang)
-        buttons = [[(f"{k['icon']} {word(k['label'], lang)}", f"tariff:{key}")] for key, k in TYPES.items()]
+        buttons = pairs([(f"{k['icon']} {word(k['label'], lang)}", f"tariff:{key}") for key, k in TYPES.items()])
         buttons.append([currency_button(lang, cur, "list")])
         return text, kb(buttons)
 
@@ -628,9 +744,8 @@ def build_brief_router(cfg_admins: tuple[int, ...], storage: Storage, pricing: S
         lang, cur, data, rate = prefs.lang(chat_id, user), prefs.cur(chat_id), pricing.get(), await rate_now()
         kind, price = TYPES[key], data["types"][key]
         n = len(kind["pages"])
-        count = {"ru": f"{n} {plural_ru(n, ('сценарий', 'сценария', 'сценариев') if key == 'bot' else ('раздел', 'раздела', 'разделов'))}",
-                 "uz": f"{n} ta {'ssenariy' if key == 'bot' else 'bo‘lim'}",
-                 "en": f"{n} {'scenarios' if key == 'bot' else 'sections'}"}[lang]
+        unit_ru, unit_uz, unit_en = kind_word(key, "unit")
+        count = {"ru": f"{n} {plural_ru(n, unit_ru)}", "uz": f"{n} ta {unit_uz}", "en": f"{n} {unit_en}{'' if n == 1 else 's'}"}[lang]
         lines = [f"{kind['icon']} {word(kind['label'], lang)}", word(kind["hint"], lang), "",
                  f"💰 {money(*price['price'], lang, cur, rate, data)}", f"🗓 {weeks_text(*map(int, price['weeks']), lang)}", "",
                  f"{t('included', lang)}:", f"• {count}", *[f"• {word(FEATURES[f]['label'], lang)}" for f in kind["features"]]]
@@ -711,7 +826,7 @@ def build_brief_router(cfg_admins: tuple[int, ...], storage: Storage, pricing: S
             return
         await state.set_state(Brief.type)
         lang = prefs.lang(message.chat.id, user)
-        await message.answer(t("intro", lang), reply_markup=kb([[(f"{k['icon']} {word(k['label'], lang)}", f"b:type:{key}")] for key, k in TYPES.items()]))
+        await message.answer(t("intro", lang), reply_markup=kb(pairs([(f"{k['icon']} {word(k['label'], lang)}", f"b:type:{key}") for key, k in TYPES.items()])))
 
     async def choose_type(message: Message, state: FSMContext, user: User | None, kind: str) -> None:
         await state.update_data(type=kind, features=list(TYPES[kind]["features"]))
@@ -749,23 +864,24 @@ def build_brief_router(cfg_admins: tuple[int, ...], storage: Storage, pricing: S
         kind = data["type"]
         order = steps_for(kind)
         head = t("step", lang, n=order.index(step) + 1, total=len(order)) + "\n\n"
-        is_bot = kind == "bot"
+        ask = TYPES[kind].get("ask", "bot" if kind_of(kind) == "bot" else "site")   # «сайт», «бот», «приложение» или «проект»
         tick = lambda on, label: ("✅ " if on else "▫️ ") + label
         nxt = [(t("btn_next", lang), "b:next")]
         if step in ("company", "about"):
             return head + t(f"ask_{step}", lang), kb([[(t("btn_skip", lang), "b:skip")]])
         if step == "goals":
             rows = [[(tick(k in data["goals"], word(v, lang)), f"b:goal:{k}")] for k, v in GOALS.items()]
-            return head + t("ask_goals_bot" if is_bot else "ask_goals_site", lang), kb([*rows, nxt])
+            return head + t(f"ask_goals_{ask}", lang), kb([*rows, nxt])
         if step == "features":
             est = estimate(data, pricing.get())
             shown = money(est["lo"], est["hi"], lang, cur, rate, pricing.get()) + ", " + weeks_text(est["wl"], est["wh"], lang)
-            keys = [k for k, f in FEATURES.items() if f["bot" if is_bot else "web"]]
+            flag = KINDS[kind_of(kind)]["flag"]           # сначала то, что входит в тип, потом остальное для этого вида
+            keys = list(dict.fromkeys([*TYPES[kind]["features"], *[k for k, f in FEATURES.items() if f.get(flag)]]))
             rows = [[(tick(k in data["features"], word(FEATURES[k]["label"], lang)), f"b:feat:{k}")] for k in keys]
             return head + t("ask_features", lang, estimate=shown), kb([*rows, nxt])
         if step == "langs":
             rows = [[(tick(k in data["langs"], word(v, lang)), f"b:lang:{k}") for k, v in SITE_LANGS.items()]]
-            return head + t("ask_langs_bot" if is_bot else "ask_langs_site", lang), kb([*rows, nxt])
+            return head + t(f"ask_langs_{ask}", lang), kb([*rows, nxt])
         if step in CHOICES:
             return head + t(f"ask_{step}", lang), kb([[(word(v, lang), f"b:{step}:{k}")] for k, v in CHOICES[step].items()])
         if step == "budget":
@@ -903,7 +1019,7 @@ def build_brief_router(cfg_admins: tuple[int, ...], storage: Storage, pricing: S
     # ---------- итог и отправка ----------
     async def summary_view(chat_id: int, user: User | None, data: dict) -> tuple[str, InlineKeyboardMarkup]:
         lang, cur, rate, prices = prefs.lang(chat_id, user), prefs.cur(chat_id), await rate_now(), pricing.get()
-        is_bot = data.get("type") == "bot"
+        is_bot = kind_of(data.get("type")) == "bot"
         est = estimate(data, prices)
         unset = t("not_set", lang)
         listed = lambda keys, table: ", ".join(word(table[k], lang) for k in keys if k in table) or unset

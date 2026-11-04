@@ -107,6 +107,21 @@ class ServerCase(unittest.IsolatedAsyncioTestCase):
         health = await (await self.client.get("/api/health")).json()
         self.assertEqual(health, {"app": "codexlab-site", "ok": True, "publish": True, "bot": False})
 
+    async def test_brand_files(self) -> None:
+        brand = self.root / "site" / "brand"
+        brand.mkdir()
+        (brand / "og.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        (brand / "favicon.ico").write_bytes(b"\x00\x00\x01\x00")
+        (brand / "notes.txt").write_text("личное", encoding="utf-8")
+        response = await self.client.get("/brand/og.png")
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.headers["Content-Type"], "image/png")
+        self.assertIn("max-age", response.headers["Cache-Control"])
+        self.assertIn("nosniff", response.headers["X-Content-Type-Options"])
+        self.assertEqual((await self.client.get("/favicon.ico")).status, 200)
+        for path in ["/brand/notes.txt", "/brand/missing.png", "/brand/..%2Findex.html", "/brand/%2E%2E%2Fsite%2Findex.html", "/brand/"]:
+            self.assertEqual((await self.client.get(path)).status, 404, path)
+
     async def test_unknown_path_is_404_and_no_file_leak(self) -> None:
         for path in ["/data/orders.sqlite3", "/../.env", "/.env", "/site/backups/"]:
             self.assertEqual((await self.client.get(path)).status, 404, path)
