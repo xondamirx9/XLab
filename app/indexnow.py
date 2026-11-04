@@ -39,9 +39,9 @@ def find_key(verify_dir: Path) -> str:
 
 
 def payload(base: str, key: str) -> dict:
-    """Запрос IndexNow: три языковые версии страницы и где лежит ключ."""
+    """Запрос IndexNow: пять страниц сайта на трёх языках и где лежит ключ."""
     return {"host": urlsplit(base).hostname or "", "key": key, "keyLocation": f"{base}/{key}.txt",
-            "urlList": [seo.page_url(base, lang) for lang in seo.LANGS]}
+            "urlList": seo.all_urls(base)}
 
 
 class IndexNow:
