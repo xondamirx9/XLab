@@ -247,7 +247,7 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
     verify = dict(cfg.search_verify)
 
     async def index(request: web.Request) -> web.StreamResponse:
-        """Страница сайта на языке: «/», «/prices», «/about», «/brief», «/templates» и «?lang=uz|en».
+        """Страница сайта на языке: «/», «/examples», «/prices», «/about», «/brief» и «?lang=uz|en».
         Один файл site/index.html; по адресу остаются только блоки этой страницы (app/seo.py)."""
         name = seo.page_of_path(request.path)
         if request.path not in ("/", "/index.html") and request.path.endswith("/"):
@@ -275,8 +275,7 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
 
     async def sitemap(request: web.Request) -> web.Response:
         loaded = load_page()
-        xml = seo.sitemap_xml(site_base(request, loaded[1] if loaded else None), loaded[2] if loaded else None,
-                              loaded[1].hidden if loaded else frozenset())
+        xml = seo.sitemap_xml(site_base(request, loaded[1] if loaded else None), loaded[2] if loaded else None)
         return web.Response(text=xml, content_type="application/xml", charset="utf-8", headers={"Cache-Control": "public, max-age=3600"})
 
     async def brand(request: web.Request) -> web.StreamResponse:

@@ -38,10 +38,10 @@ def find_key(verify_dir: Path) -> str:
     return ""
 
 
-def payload(base: str, key: str, hidden: frozenset[str] | set[str] = frozenset()) -> dict:
-    """Запрос IndexNow: страницы сайта на трёх языках (без заглушек) и где лежит ключ."""
+def payload(base: str, key: str) -> dict:
+    """Запрос IndexNow: пять страниц сайта на трёх языках и где лежит ключ."""
     return {"host": urlsplit(base).hostname or "", "key": key, "keyLocation": f"{base}/{key}.txt",
-            "urlList": seo.all_urls(base, hidden)}
+            "urlList": seo.all_urls(base)}
 
 
 class IndexNow:
@@ -54,24 +54,23 @@ class IndexNow:
         """Сайт опубликован из админки: отправить адреса заново."""
         self._wake.set()
 
-    def _site(self) -> tuple[str, frozenset[str]]:
-        """Адрес сайта и страницы-заглушки, которые поисковикам не отправляем."""
+    def _base(self) -> str:
         try:
             meta = seo.read_meta(self.cfg.index_file.read_text(encoding="utf-8", errors="replace"))
         except OSError:
-            return "", frozenset()
-        return meta.site or self.cfg.public_url, meta.hidden
+            return ""
+        return meta.site or self.cfg.public_url
 
     async def submit(self) -> bool:
         key = find_key(self.cfg.site_dir / "verify")
-        base, hidden = self._site()
+        base = self._base()
         if not key or not base:
             log.info("IndexNow: пропускаем — %s", "нет ключа в site/verify" if not key else "неизвестен адрес сайта")
             return False
         try:
             timeout = aiohttp.ClientTimeout(total=20)
             async with aiohttp.ClientSession(timeout=timeout, trust_env=True, headers={"User-Agent": "CodexLab-site/1.0"}) as session:
-                async with session.post(self.endpoint, json=payload(base, key, hidden)) as response:
+                async with session.post(self.endpoint, json=payload(base, key)) as response:
                     status = response.status
         except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
             log.warning("IndexNow: поисковики недоступны (%s)", type(exc).__name__)
