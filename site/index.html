@@ -493,7 +493,9 @@ textarea.in{min-height:96px;resize:vertical}
 
 /* ---------- Свет на первом экране ---------- */
 .hero::before{display:none}
-.aurora{position:absolute;inset:0;z-index:-1;overflow:hidden;pointer-events:none}
+.aurora{position:absolute;inset:0;z-index:-1;overflow:hidden;pointer-events:none;
+  /* размытые пятна гаснут к нижнему краю первого экрана: иначе край блока обрезал их ровной полосой */
+  -webkit-mask-image:linear-gradient(180deg,#000 45%,transparent 92%);mask-image:linear-gradient(180deg,#000 45%,transparent 92%)}
 .aurora i{position:absolute;border-radius:50%;filter:blur(72px);will-change:transform}
 .aurora i:nth-child(1){width:580px;height:580px;right:2%;top:-16%;background:#C8141F;opacity:.5;animation:drift1 18s ease-in-out infinite alternate}
 .aurora i:nth-child(2){width:420px;height:420px;right:30%;top:38%;background:#E8A917;opacity:.2;animation:drift2 23s ease-in-out infinite alternate}
@@ -1214,32 +1216,31 @@ html[data-page="brief"] #brief{padding-top:64px}
 .soon-acts{display:flex;flex-wrap:wrap;gap:12px;margin-top:20px}
 
 /* Меню: текущая страница; на узком экране — кнопка и выпадающий список */
-/* Ссылки меню в шапке: при наведении за текстом проявляется мягкая подложка (::before), а под текстом
-   слева направо прорисовывается красно-золотая линия (::after); у открытой страницы линия остаётся.
+/* Ссылки меню в шапке: при наведении за текстом проявляется красная подложка (::before), а под текстом
+   слева направо прорисовывается красная линия (::after); у открытой страницы линия остаётся.
    Уводим курсор — линия уходит вправо. При «меньше движения» — без анимации. */
 .top .nav a{position:relative;isolation:isolate;padding:8px 2px;transition:color .25s ease}
-.top .nav a::before{content:"";position:absolute;z-index:-1;inset:2px -12px;border-radius:999px;background:color-mix(in srgb,var(--ink) 9%,transparent);opacity:0;transform:scale(.82);transition:opacity .25s ease,transform .35s cubic-bezier(.2,.8,.2,1)}
-.top .nav a::after{content:"";position:absolute;left:0;right:0;bottom:0;height:2px;border-radius:2px;background:linear-gradient(90deg,var(--brand),var(--gold));transform:scaleX(0);transform-origin:right center;transition:transform .4s cubic-bezier(.2,.8,.2,1)}
+.top .nav a::before{content:"";position:absolute;z-index:-1;inset:2px -12px;border-radius:999px;background:color-mix(in srgb,var(--brand) 20%,transparent);opacity:0;transform:scale(.82);transition:opacity .25s ease,transform .35s cubic-bezier(.2,.8,.2,1)}
+.top .nav a::after{content:"";position:absolute;left:0;right:0;bottom:0;height:2px;border-radius:2px;background:var(--brand);transform:scaleX(0);transform-origin:right center;transition:transform .4s cubic-bezier(.2,.8,.2,1)}
 .top .nav a:hover,.top .nav a:focus-visible,.top .nav a[aria-current="page"]{color:var(--ink)}
 .top .nav a:hover::before,.top .nav a:focus-visible::before{opacity:1;transform:scale(1)}
 .top .nav a:hover::after,.top .nav a:focus-visible::after,.top .nav a[aria-current="page"]::after{transform:scaleX(1);transform-origin:left center}
 .top .nav a:focus-visible{outline:none}
 .top.is-menu .nav a::before,.top.is-menu .nav a::after{display:none}   /* в выпадающем меню — свои подложки */
 /* Ссылки на страницах — тот же приём. В тексте («Смотреть примеры», адрес проекта, «Хочу похожий»)
-   тонкая линия видна и в покое — это ссылка; при наведении она заново прорисовывается слева направо
-   красно-золотой. Ссылки подвала и «хлебных крошек» — как в меню: в покое без линии. */
+   тонкая красная линия видна и в покое — это ссылка; при наведении она заново прорисовывается слева
+   направо в полную силу. Ссылки подвала и «хлебных крошек» — как в меню: в покое без линии. */
 .link,.link-like,.foot-nav a,.crumbs a{position:relative;isolation:isolate;display:inline-block;text-decoration:none}
 .link,.link-like{padding:2px 0}
 .foot-nav a,.crumbs a{padding:4px 0}
 .foot-nav a:hover{text-decoration:none}
-.link::before,.link-like::before,.foot-nav a::before,.crumbs a::before{content:"";position:absolute;z-index:-1;inset:-4px -10px;border-radius:999px;background:color-mix(in srgb,var(--ink) 9%,transparent);opacity:0;transform:scale(.82);transition:opacity .25s ease,transform .35s cubic-bezier(.2,.8,.2,1)}
-.link::before,.link-like::before{background:color-mix(in srgb,var(--brand-text) 13%,transparent)}
-.link::after,.link-like::after,.foot-nav a::after,.crumbs a::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;border-radius:2px;background:linear-gradient(90deg,var(--brand),var(--gold));transform:scaleX(0);transform-origin:right center;transition:transform .4s cubic-bezier(.2,.8,.2,1)}
-.link::after,.link-like::after{background:currentColor;opacity:.4;transform:none;transition:none}
+.link::before,.link-like::before,.foot-nav a::before,.crumbs a::before{content:"";position:absolute;z-index:-1;inset:-4px -10px;border-radius:999px;background:color-mix(in srgb,var(--brand) 20%,transparent);opacity:0;transform:scale(.82);transition:opacity .25s ease,transform .35s cubic-bezier(.2,.8,.2,1)}
+.link::after,.link-like::after,.foot-nav a::after,.crumbs a::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;border-radius:2px;background:var(--brand);transform:scaleX(0);transform-origin:right center;transition:transform .4s cubic-bezier(.2,.8,.2,1)}
+.link::after,.link-like::after{opacity:.5;transform:none;transition:none}
 .link:hover::before,.link-like:hover::before,.foot-nav a:hover::before,.crumbs a:hover::before,
 .link:focus-visible::before,.link-like:focus-visible::before,.foot-nav a:focus-visible::before,.crumbs a:focus-visible::before{opacity:1;transform:scale(1)}
 .foot-nav a:hover::after,.crumbs a:hover::after,.foot-nav a:focus-visible::after,.crumbs a:focus-visible::after{transform:scaleX(1);transform-origin:left center}
-.link:hover::after,.link-like:hover::after,.link:focus-visible::after,.link-like:focus-visible::after{background:linear-gradient(90deg,var(--brand),var(--gold));opacity:1;animation:lineDraw .45s cubic-bezier(.2,.8,.2,1)}
+.link:hover::after,.link-like:hover::after,.link:focus-visible::after,.link-like:focus-visible::after{opacity:1;animation:lineDraw .45s cubic-bezier(.2,.8,.2,1)}
 @keyframes lineDraw{from{transform:scaleX(0)}to{transform:scaleX(1)}}
 @media (prefers-reduced-motion:reduce){
   .top .nav a,.top .nav a::before,.top .nav a::after,.link::before,.link-like::before,.foot-nav a::before,.crumbs a::before,.foot-nav a::after,.crumbs a::after{transition:none}
