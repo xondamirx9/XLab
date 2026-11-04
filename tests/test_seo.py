@@ -68,7 +68,9 @@ class StructuredDataTest(unittest.TestCase):
         page = seo.localize_page(SITE, "ru", seo.read_meta(SITE), page="about")
         markup = page.partition("</head>")[2].partition('<script type="application/json" id="site-data">')[0]
         self.assertIn("ул. Кораташ, 106", markup)
-        self.assertIn('<iframe src="https://www.google.com/maps?q=41.3141551,69.2376133&amp;z=17&amp;hl=ru&amp;output=embed"', markup)
+        # живую карту ставит код страницы, когда сайт на своём сервере; в разметке — рисунок карты и адрес встраивания
+        self.assertIn('data-embed="https://www.google.com/maps?q=41.3141551,69.2376133&amp;z=17&amp;hl=ru&amp;output=embed"', markup)
+        self.assertNotIn("<iframe", markup)
         self.assertIn('href="https://www.google.com/maps/dir/?api=1&amp;destination=41.3141551,69.2376133"', markup)
         self.assertIn('href="https://maps.app.goo.gl/rtPo7oZBKVTv1oSXA"', markup)
         home = seo.localize_page(SITE, "ru", seo.read_meta(SITE), page="home")
