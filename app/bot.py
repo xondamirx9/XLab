@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import deque
 from datetime import datetime, timedelta, timezone
 from typing import Callable
 
@@ -25,6 +26,7 @@ log = logging.getLogger("site.bot")
 
 MAX_ATTEMPTS = 30            # после этого заявка остаётся в базе, но пересылать её перестаём
 RETRY_EVERY = 60             # секунд между повторными попытками
+MAX_ALERTS = 50              # столько служебных уведомлений ждут, пока Telegram недоступен
 MESSAGE_LIMIT = 3900         # у Telegram предел 4096 знаков в сообщении
 TASHKENT = timezone(timedelta(hours=5))
 
@@ -72,9 +74,37 @@ class Notifier:
     def __init__(self, cfg: Config, storage: Storage, bot: Bot | None) -> None:
         self._cfg, self._storage, self._bot = cfg, storage, bot
         self._wake = asyncio.Event()
+        self._alerts: deque[str] = deque(maxlen=MAX_ALERTS)
 
     def wake(self) -> None:
         self._wake.set()
+
+    def alert(self, text: str) -> None:
+        """Служебное уведомление администраторам: действие с паролем администратора. Уйдёт из цикла доставки."""
+        self._alerts.append(text)
+        self.wake()
+
+    async def _send_alert(self, chat_id: int, text: str) -> bool:
+        assert self._bot is not None
+        try:
+            await self._bot.send_message(chat_id, text)
+            return True
+        except TelegramRetryAfter as exc:
+            log.warning("Telegram просит подождать %s с; уведомление уйдёт позже", exc.retry_after)
+        except TelegramAPIError as exc:
+            log.warning("уведомление не доставлено в чат %s: %s", chat_id, type(exc).__name__)
+        return False
+
+    async def deliver_alerts(self) -> None:
+        """Отправляет уведомления по порядку. Никто не получил — оставляем в очереди до следующего круга."""
+        if self._bot is None or not self._cfg.admin_chat_ids:
+            self._alerts.clear()
+            return
+        while self._alerts:
+            results = [await self._send_alert(chat_id, self._alerts[0]) for chat_id in self._cfg.admin_chat_ids]
+            if not any(results):
+                return
+            self._alerts.popleft()
 
     async def _send_to(self, chat_id: int, order: Order) -> bool:
         assert self._bot is not None
@@ -108,6 +138,7 @@ class Notifier:
     async def run(self, stop: asyncio.Event) -> None:
         while not stop.is_set():
             try:
+                await self.deliver_alerts()
                 await self.deliver_pending()
             except Exception:                 # цикл доставки не должен умирать из-за одной ошибки
                 log.exception("сбой при пересылке заявок")
@@ -123,7 +154,7 @@ def build_dispatcher(cfg: Config, storage: Storage, *, news: NewsStore | None = 
                      wake_worker: Callable[[], None] = lambda: None, rates: RateService | None = None,
                      wake_orders: Callable[[], None] = lambda: None) -> Dispatcher:
     router = Router()
-    is_admin = lambda message: message.chat.id in cfg.admin_chat_ids
+    is_admin = lambda message: cfg.is_admin(message.chat.id, message.from_user.id if message.from_user else None)
     prefs = ChatPrefs()                       # язык и валюта, которые выбрал человек
     has_studio = studio_store is not None
 
@@ -138,6 +169,8 @@ def build_dispatcher(cfg: Config, storage: Storage, *, news: NewsStore | None = 
                 "/studio — проекты студии сайтов\n/lessons — чему научились агенты\n/site — создать сайт (без лимита)\n"
                 "/prices — тарифы, /brief — конструктор ТЗ: так их видят клиенты"
             )
+        elif message.chat.id in cfg.admin_chat_ids:   # служебная группа: заявки сюда приходят, команды — только администраторам
+            await message.answer("Заявки с сайта приходят в этот чат. Команды доступны только администраторам.")
         elif news is not None:
             await news.subscribe(message.chat.id, message.from_user.full_name if message.from_user else "")
             lang = prefs.lang(message.chat.id, message.from_user)
@@ -151,7 +184,10 @@ def build_dispatcher(cfg: Config, storage: Storage, *, news: NewsStore | None = 
 
     @router.message(Command("id"))
     async def chat_id(message: Message) -> None:
-        await message.answer(f"Номер этого чата: {message.chat.id}\nДля заявок впишите его в ADMIN_CHAT_IDS в файле .env.")
+        text = f"Номер этого чата: {message.chat.id}\nДля заявок впишите его в ADMIN_CHAT_IDS в файле .env."
+        if message.from_user and message.from_user.id != message.chat.id:
+            text += f"\n\nВаш личный номер: {message.from_user.id}\nЧтобы управлять ботом из группы, впишите его в ADMIN_USER_IDS."
+        await message.answer(text)
 
     @router.message(Command("last"))
     async def last(message: Message) -> None:
@@ -190,7 +226,7 @@ def build_dispatcher(cfg: Config, storage: Storage, *, news: NewsStore | None = 
     dispatcher = Dispatcher()
     dispatcher.include_router(router)
     # Тарифы и конструктор ТЗ — раньше студии: их состояния и /cancel должны срабатывать первыми
-    dispatcher.include_router(build_brief_router(cfg.admin_chat_ids, storage, SitePricing(cfg.index_file), prefs, rates=rates,
+    dispatcher.include_router(build_brief_router(cfg.admin_users, storage, SitePricing(cfg.index_file), prefs, rates=rates,
                                                  wake_orders=wake_orders, studio=has_studio, news=news is not None))
     if news is not None or studio_store is not None:
         dispatcher.include_router(build_user_router(cfg, news=news, store=studio_store, studio=studio,

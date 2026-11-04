@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
+from urllib.parse import quote
 
 from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
@@ -19,7 +22,7 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from app.bot import Notifier, build_dispatcher, order_header, stats_text
-from app.config import Config
+from app.config import Config, ConfigError
 from app.storage import Storage
 from app.web import RateLimiter, client_ip, create_app, today
 
@@ -105,6 +108,21 @@ class ServerCase(unittest.IsolatedAsyncioTestCase):
         health = await (await self.client.get("/api/health")).json()
         self.assertEqual(health, {"app": "codexlab-site", "ok": True, "publish": True, "bot": False})
 
+    async def test_brand_files(self) -> None:
+        brand = self.root / "site" / "brand"
+        brand.mkdir()
+        (brand / "og.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        (brand / "favicon.ico").write_bytes(b"\x00\x00\x01\x00")
+        (brand / "notes.txt").write_text("личное", encoding="utf-8")
+        response = await self.client.get("/brand/og.png")
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.headers["Content-Type"], "image/png")
+        self.assertIn("max-age", response.headers["Cache-Control"])
+        self.assertIn("nosniff", response.headers["X-Content-Type-Options"])
+        self.assertEqual((await self.client.get("/favicon.ico")).status, 200)
+        for path in ["/brand/notes.txt", "/brand/missing.png", "/brand/..%2Findex.html", "/brand/%2E%2E%2Fsite%2Findex.html", "/brand/"]:
+            self.assertEqual((await self.client.get(path)).status, 404, path)
+
     async def test_unknown_path_is_404_and_no_file_leak(self) -> None:
         for path in ["/data/orders.sqlite3", "/../.env", "/.env", "/site/backups/"]:
             self.assertEqual((await self.client.get(path)).status, 404, path)
@@ -180,6 +198,29 @@ class ServerCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client_ip(request("2001:db8:1:2::1"), True), client_ip(request("2001:db8:1:2:ffff::9"), True))
         self.assertNotEqual(client_ip(request("2001:db8:1:2::1"), True), client_ip(request("2001:db8:1:3::1"), True))
         self.assertEqual(client_ip(request("::ffff:5.6.7.8"), True), "5.6.7.8")
+
+    def test_client_ip_behind_cloud_platform(self) -> None:
+        request = lambda remote, forwarded="": SimpleNamespace(remote=remote, headers={"X-Forwarded-For": forwarded} if forwarded else {})
+        cloud = lambda remote, forwarded="": client_ip(request(remote, forwarded), True, True)
+        self.assertEqual(cloud("10.204.5.7", "203.0.113.5"), "203.0.113.5")
+        self.assertEqual(cloud("10.204.5.7", "203.0.113.5, 162.158.90.1, 10.10.0.4"), "203.0.113.5")      # Cloudflare и балансировщик пропущены
+        self.assertEqual(cloud("10.204.5.7", "198.51.100.77, 203.0.113.5, 172.70.1.2"), "203.0.113.5")    # подделку клиента слева не берём
+        self.assertEqual(cloud("10.204.5.7", "2001:db8:1:2::9, 2606:4700::1"), "2001:db8:1:2::/64")
+        self.assertEqual(cloud("10.204.5.7", "мусор, 203.0.113.5"), "203.0.113.5")
+        self.assertEqual(cloud("10.204.5.7", "203.0.113.5, мусор"), "10.204.5.7")                         # мусор справа — заголовку не верим
+        self.assertEqual(cloud("10.204.5.7"), "10.204.5.7")
+        self.assertEqual(cloud("198.51.100.4", "203.0.113.5"), "198.51.100.4")      # пришёл не из сети платформы — заголовку не верим
+        self.assertEqual(client_ip(request("10.204.5.7", "203.0.113.5"), True), "10.204.5.7")              # режим выключен
+
+    def test_trust_proxy_setting(self) -> None:
+        def load(**env: str) -> Config:
+            with mock.patch.dict(os.environ, env, clear=True), mock.patch("app.config.load_env_file"):
+                return Config.from_env()
+        self.assertEqual((load().trust_proxy, load().cloud_proxy), (True, False))                           # по умолчанию — Caddy или nginx
+        self.assertEqual((load(RENDER="true").trust_proxy, load(RENDER="true").cloud_proxy), (True, True))   # Render узнаём сами
+        self.assertFalse(load(RENDER="true", TRUST_PROXY="1").cloud_proxy)                                   # явная настройка важнее
+        self.assertTrue(load(TRUST_PROXY="cloud").cloud_proxy)
+        self.assertEqual((load(TRUST_PROXY="0").trust_proxy, load(TRUST_PROXY="0").cloud_proxy), (False, False))
 
     def test_rate_limiter_window(self) -> None:
         now = [0.0]
@@ -320,6 +361,113 @@ class ServerCase(unittest.IsolatedAsyncioTestCase):
         header = order_header(await self.storage.get(1))
         self.assertIn("(Ташкент)", header)
         self.assertIn("Ориентир: 3–9 млн сум, 1–2 нед.", header)
+
+
+class AdminAccessCase(unittest.IsolatedAsyncioTestCase):
+    """Права в боте проверяются у человека, а уведомления об админских действиях доходят до чатов."""
+
+    GROUP = -100500
+    ADMIN = 111
+    MEMBER = 555
+
+    async def asyncSetUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        (self.root / "site").mkdir()
+        (self.root / "site" / "index.html").write_text(PAGE, encoding="utf-8")
+        self.cfg = make_config(self.root, admin_chat_ids=(self.GROUP,), admin_user_ids=(self.ADMIN,), trust_proxy=True)
+        self.storage = Storage(self.cfg.data_dir / "orders.sqlite3")
+        await self.storage.init()
+        self.alerts: list[str] = []
+        self.client = TestClient(TestServer(create_app(self.cfg, self.storage, lambda: None, on_admin_action=self.alerts.append)))
+        await self.client.start_server()
+        self.addAsyncCleanup(self.client.close)
+        self.telegram = FakeTelegram()
+        url = await self.telegram.start()
+        self.addAsyncCleanup(self.telegram.close)
+        self.bot = Bot("123456:TEST", default=DefaultBotProperties(parse_mode=None), session=AiohttpSession(api=TelegramAPIServer.from_base(url)))
+        self.addAsyncCleanup(self.bot.session.close)
+
+    async def asyncTearDown(self) -> None:
+        self.tmp.cleanup()
+
+    @staticmethod
+    def update(update_id: int, chat_id: int, user_id: int, text: str) -> Update:
+        chat_type = "private" if chat_id > 0 else "supergroup"
+        return Update.model_validate({"update_id": update_id, "message": {
+            "message_id": update_id, "date": 1700000000, "chat": {"id": chat_id, "type": chat_type},
+            "from": {"id": user_id, "is_bot": False, "first_name": "Тест"}, "text": text,
+            "entities": [{"type": "bot_command", "offset": 0, "length": len(text.split()[0])}]}})
+
+    def test_who_is_admin(self) -> None:
+        cfg = self.cfg
+        self.assertTrue(cfg.is_admin(self.GROUP, self.ADMIN))             # администратор в служебной группе
+        self.assertTrue(cfg.is_admin(self.ADMIN, self.ADMIN))             # и в личном чате с ботом
+        self.assertFalse(cfg.is_admin(self.GROUP, self.MEMBER))           # участник группы — нет
+        self.assertFalse(cfg.is_admin(self.MEMBER, self.MEMBER))          # посторонний в личке — нет
+        self.assertFalse(cfg.is_admin(-999, self.ADMIN))                  # в чужой группе заявки не показываем
+        self.assertFalse(cfg.is_admin(self.GROUP, None))                  # сообщение без автора
+        old_style = make_config(self.root, admin_chat_ids=(111, -5))      # настройка без ADMIN_USER_IDS
+        self.assertTrue(old_style.is_admin(111, 111))                     # личный чат работает как раньше
+        self.assertTrue(old_style.is_admin(-5, 111))                      # и в группе этот человек остаётся администратором
+        self.assertFalse(old_style.is_admin(-5, 222))                     # а остальные участники группы — нет
+        self.assertEqual(old_style.admin_users, (111,))
+
+    async def test_group_member_gets_no_admin_commands(self) -> None:
+        await self.client.post("/api/order", json=order_body())
+        dispatcher = build_dispatcher(self.cfg, self.storage)
+        for number, text in enumerate(("/last", "/stats", "/forget 1"), 1):
+            await dispatcher.feed_update(self.bot, self.update(number, self.GROUP, self.MEMBER, text))
+        self.assertEqual(self.telegram.calls, [])
+        self.assertIsNotNone(await self.storage.get(1))                   # заявка не удалена
+        await dispatcher.feed_update(self.bot, self.update(4, self.GROUP, self.ADMIN, "/last"))
+        self.assertIn("Азиз", self.telegram.calls[-1][1]["text"])
+
+    async def test_group_start_and_id(self) -> None:
+        dispatcher = build_dispatcher(self.cfg, self.storage)
+        await dispatcher.feed_update(self.bot, self.update(1, self.GROUP, self.MEMBER, "/start"))
+        self.assertIn("только администраторам", self.telegram.calls[-1][1]["text"])
+        await dispatcher.feed_update(self.bot, self.update(2, self.GROUP, self.MEMBER, "/id"))
+        self.assertIn(f"Ваш личный номер: {self.MEMBER}", self.telegram.calls[-1][1]["text"])
+
+    async def test_total_password_limit_stops_guessing_from_many_addresses(self) -> None:
+        wrong = {"Authorization": "Bearer не-тот-пароль"}
+        for number in range(30):                                          # каждый раз новый адрес: лимит на адрес не срабатывает
+            response = await self.client.post("/api/publish", data=PAGE, headers={**wrong, "X-Forwarded-For": f"8.8.{number}.1"})
+            self.assertEqual(response.status, 401)
+        self.assertEqual(len(self.alerts), 1)
+        self.assertIn("Подбор пароля", self.alerts[0])
+        right = {"Authorization": f"Bearer {quote(PASSWORD)}", "X-Forwarded-For": "8.8.200.1"}
+        blocked = await self.client.post("/api/publish", data=PAGE, headers=right)
+        self.assertEqual(blocked.status, 429)                             # по ответу нельзя понять, что пароль верный
+        self.assertEqual(len(self.alerts), 1)
+
+    async def test_publish_is_reported(self) -> None:
+        headers = {"Authorization": f"Bearer {quote(PASSWORD)}", "X-Forwarded-For": "8.8.4.4"}
+        self.assertEqual((await self.client.post("/api/publish", data=PAGE, headers=headers)).status, 200)
+        self.assertEqual(len(self.alerts), 1)
+        self.assertIn("Адрес: 8.8.4.4", self.alerts[0])
+        self.assertIn("index-", self.alerts[0])                           # имя копии для отката
+
+    async def test_alert_waits_until_telegram_is_back(self) -> None:
+        notifier = Notifier(self.cfg, self.storage, self.bot)
+        notifier.alert("Сайт опубликован")
+        self.telegram.fail = True
+        await notifier.deliver_alerts()
+        self.telegram.fail = False
+        await notifier.deliver_alerts()
+        await notifier.deliver_alerts()                                   # второй раз не дублирует
+        self.assertEqual([fields["text"] for method, fields in self.telegram.calls], ["Сайт опубликован"] * 2)
+        self.assertEqual(self.telegram.calls[-1][1]["chat_id"], str(self.GROUP))
+
+
+class AdminConfigCase(unittest.TestCase):
+    def test_admin_user_ids_are_read_and_checked(self) -> None:
+        with mock.patch.dict(os.environ, {"ADMIN_CHAT_IDS": "-100500", "ADMIN_USER_IDS": "111, 222"}), mock.patch("app.config.load_env_file"):
+            self.assertEqual(Config.from_env().admin_user_ids, (111, 222))
+        with mock.patch.dict(os.environ, {"ADMIN_USER_IDS": "-100500"}), mock.patch("app.config.load_env_file"):
+            with self.assertRaises(ConfigError):
+                Config.from_env()
 
 
 if __name__ == "__main__":

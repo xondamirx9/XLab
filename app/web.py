@@ -1,6 +1,7 @@
 """HTTP-часть: сайт, приём заявок, публикация новой версии сайта из админки."""
 from __future__ import annotations
 
+import hashlib
 import hmac
 import ipaddress
 import json
@@ -20,6 +21,7 @@ from aiohttp import web
 from app.config import Config
 from app.news import NewsStore
 from app.rates import RateService
+from app import seo
 from app.storage import Storage
 from app.studio.pipeline import Studio
 from app.studio.store import StudioStore
@@ -31,6 +33,10 @@ MAX_ORDER_BYTES = 64 * 1024
 MAX_PUBLISH_BYTES = 12 * 1024 * 1024
 MAX_TEXT_CHARS = 20_000
 KEEP_BACKUPS = 20
+BRAND_FILE = re.compile(r"[a-z0-9-]{1,40}\.(png|svg|ico)")    # файлы site/brand, которые сервер отдаёт как есть
+# Файлы подтверждения прав на сайт в корне сайта: Google Search Console, Яндекс Вебмастер, Bing и ключ IndexNow
+VERIFY_FILE = r"(?:google[0-9a-f]{16}\.html|yandex_[0-9a-f]{16}\.html|BingSiteAuth\.xml|[0-9a-f]{32}\.txt)"
+VERIFY_TYPES = {".html": "text/html", ".xml": "application/xml", ".txt": "text/plain"}
 PROJECTS = {"landing": "Лендинг", "corp": "Сайт компании", "shop": "Интернет-магазин",
             "app": "Веб-сервис с кабинетом", "bot": "Telegram-бот"}
 CLIENT_ID = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
@@ -119,6 +125,35 @@ def _is_loopback(address: str | None) -> bool:
         return False
 
 
+# Сети Cloudflare (cloudflare.com/ips): через них идут запросы к облачным платформам вроде Render.
+CLOUDFLARE_NETS = tuple(ipaddress.ip_network(net) for net in (
+    "173.245.48.0/20", "103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22", "141.101.64.0/18", "108.162.192.0/18",
+    "190.93.240.0/20", "188.114.96.0/20", "197.234.240.0/22", "198.41.128.0/17", "162.158.0.0/15", "104.16.0.0/13",
+    "104.24.0.0/14", "172.64.0.0/13", "131.0.72.0/22", "2400:cb00::/32", "2606:4700::/32", "2803:f800::/32",
+    "2405:b500::/32", "2405:8100::/32", "2a06:98c0::/29", "2c0f:f248::/32"))
+# Внутренние сети, из которых балансировщик платформы приходит к приложению. Список явный: ip.is_private
+# считает частными и служебные диапазоны (документационные, тестовые), которые внутренней сетью не являются.
+INTERNAL_NETS = tuple(ipaddress.ip_network(net) for net in (
+    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16",
+    "fc00::/7", "fe80::/10", "::1/128"))
+
+
+def _parse_ip(address: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    try:
+        ip = ipaddress.ip_address(address.strip())
+    except ValueError:
+        return None
+    return ip.ipv4_mapped if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped else ip
+
+
+def _is_internal(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    return any(ip in net for net in INTERNAL_NETS if net.version == ip.version)
+
+
+def _is_platform_proxy(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    return _is_internal(ip) or any(ip in net for net in CLOUDFLARE_NETS if net.version == ip.version)
+
+
 def _rate_key(address: str) -> str:
     """Ключ для ограничений частоты. IPv6 считаем по сети /64: провайдер выдаёт её целиком одному клиенту,
     и иначе можно было бы обходить лимиты (и подбирать пароль), просто меняя адрес внутри своей сети."""
@@ -133,7 +168,7 @@ def _rate_key(address: str) -> str:
     return str(ip)
 
 
-def client_ip(request: web.Request, trust_proxy: bool) -> str:
+def client_ip(request: web.Request, trust_proxy: bool, cloud_proxy: bool = False) -> str:
     """Адрес клиента — ключ для ограничений частоты."""
     # X-Forwarded-For читаем, только если запрос пришёл от прокси на этой же машине (Caddy или nginx по README).
     # Иначе, если сервер случайно открыт наружу напрямую, клиент подставил бы любой адрес и обошёл все лимиты.
@@ -142,6 +177,17 @@ def client_ip(request: web.Request, trust_proxy: bool) -> str:
         if forwarded:
             # Берём последний адрес: его дописал наш собственный прокси. Первые значения клиент может подделать.
             return _rate_key(forwarded.split(",")[-1].strip())
+    remote = _parse_ip(request.remote or "")
+    if cloud_proxy and remote is not None and _is_internal(remote):
+        # Облачная платформа (Render): запрос проходит Cloudflare и балансировщик во внутренней сети, каждый дописывает
+        # адрес в X-Forwarded-For. Присланное самим клиентом остаётся левее, поэтому идём справа налево,
+        # пропускаем адреса прокси, и первый чужой адрес — посетитель.
+        for part in reversed(request.headers.get("X-Forwarded-For", "").split(",")):
+            ip = _parse_ip(part)
+            if ip is None:                           # мусор в заголовке — левее ничему не верим
+                break
+            if not _is_platform_proxy(ip):
+                return _rate_key(str(ip))
     return _rate_key(request.remote or "unknown")
 
 
@@ -159,10 +205,12 @@ def _estimate_text(estimate: object) -> str:
 
 def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
                bot_enabled: bool = False, studio: StudioContext | None = None,
-               rates: RateService | None = None) -> web.Application:
+               rates: RateService | None = None, on_site_changed: Callable[[], None] = lambda: None,
+               on_admin_action: Callable[[str], None] = lambda text: None) -> web.Application:
     order_limit = RateLimiter(limit=5, window=600)        # 5 заявок за 10 минут с одного адреса
     order_total = RateLimiter(limit=120, window=3600)     # и не больше 120 в час со всех адресов
     auth_fails = RateLimiter(limit=5, window=900)         # 5 неверных паролей за 15 минут
+    auth_total = RateLimiter(limit=30, window=3600)       # и не больше 30 в час со всех адресов: адрес можно подделать
     event_limit = RateLimiter(limit=30, window=600)       # счётчик воронки: до 30 событий за 10 минут с адреса
 
     @web.middleware
@@ -177,10 +225,77 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
             response.headers.setdefault(key, value)
         return response
 
+    page_cache: dict[object, object] = {}
+
+    def load_page() -> tuple[str, seo.PageMeta, float] | None:
+        """Страница и её настройки для поисковиков. Перечитывается, когда файл изменился (публикация из админки)."""
+        try:
+            stat = cfg.index_file.stat()
+        except OSError:
+            return None
+        key = (stat.st_mtime_ns, stat.st_size)
+        if page_cache.get("key") != key:
+            text = cfg.index_file.read_text(encoding="utf-8", errors="replace")
+            page_cache.clear()
+            page_cache.update(key=key, page=(text, seo.read_meta(text), stat.st_mtime))
+        return page_cache["page"]  # type: ignore[return-value]
+
+    def site_base(request: web.Request, meta: seo.PageMeta | None) -> str:
+        """Адрес сайта для robots.txt и sitemap.xml: из админки («Адрес сайта»), иначе PUBLIC_URL, иначе адрес запроса."""
+        if meta is not None and meta.site:
+            return meta.site
+        return cfg.public_url or f"https://{request.host}"
+
+    verify = dict(cfg.search_verify)
+
     async def index(request: web.Request) -> web.StreamResponse:
-        if not cfg.index_file.is_file():
+        """Страница сайта на языке: «/», «/examples», «/prices», «/about», «/partners», «/brief» и «?lang=uz|en».
+        Один файл site/index.html; по адресу остаются только блоки этой страницы (app/seo.py)."""
+        name = seo.page_of_path(request.path)
+        if request.path not in ("/", "/index.html") and request.path.endswith("/"):
+            raise web.HTTPMovedPermanently(seo.PAGES[name] + (f"?{request.query_string}" if request.query_string else ""))
+        lang = request.query.get("lang", "")
+        lang = lang if lang in seo.LANGS else seo.LANGS[0]
+        loaded = load_page()
+        if loaded is None:
             return web.Response(status=503, text="Сайт ещё не загружен: положите index.html в папку site.")
-        return web.FileResponse(cfg.index_file, headers={"Cache-Control": "no-cache"})
+        page, meta, _ = loaded
+        variant = page_cache.get((name, lang))
+        if not isinstance(variant, tuple):
+            body = seo.localize_page(page, lang, meta, verify, name).encode("utf-8")
+            variant = page_cache[(name, lang)] = (body, '"' + hashlib.sha256(body).hexdigest()[:32] + '"')
+        body, etag = variant
+        headers = {"Cache-Control": "no-cache", "ETag": etag}
+        if etag in request.headers.get("If-None-Match", ""):    # страница не менялась — браузер берёт свою копию
+            return web.Response(status=304, headers=headers)
+        return web.Response(body=body, content_type="text/html", charset="utf-8", headers=headers)
+
+    async def robots(request: web.Request) -> web.Response:
+        loaded = load_page()
+        text = seo.robots_txt(site_base(request, loaded[1] if loaded else None))
+        return web.Response(text=text, content_type="text/plain", charset="utf-8", headers={"Cache-Control": "public, max-age=3600"})
+
+    async def sitemap(request: web.Request) -> web.Response:
+        loaded = load_page()
+        xml = seo.sitemap_xml(site_base(request, loaded[1] if loaded else None), loaded[2] if loaded else None,
+                              loaded[1].hidden if loaded else frozenset())
+        return web.Response(text=xml, content_type="application/xml", charset="utf-8", headers={"Cache-Control": "public, max-age=3600"})
+
+    async def brand(request: web.Request) -> web.StreamResponse:
+        """Логотипы, значки и картинка-превью из site/brand: только плоские имена png/svg/ico, без подпапок."""
+        name = request.match_info.get("name", "favicon.ico")
+        path = cfg.site_dir / "brand" / name
+        if not BRAND_FILE.fullmatch(name) or not path.is_file():
+            raise web.HTTPNotFound()
+        return web.FileResponse(path, headers={"Cache-Control": "public, max-age=86400"})
+
+    async def verify_file(request: web.Request) -> web.StreamResponse:
+        """Файл подтверждения (Search Console, Вебмастер, Bing) или ключ IndexNow: лежит в site/verify, отдаётся из корня."""
+        path = cfg.site_dir / "verify" / request.match_info["name"]
+        if not path.is_file():
+            raise web.HTTPNotFound()
+        kind = VERIFY_TYPES[path.suffix]
+        return web.FileResponse(path, headers={"Cache-Control": "no-cache", "Content-Type": f"{kind}; charset=utf-8"})
 
     async def health(request: web.Request) -> web.Response:
         data = {"app": "codexlab-site", "ok": True, "publish": cfg.publish_enabled, "bot": bot_enabled}
@@ -198,21 +313,29 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
 
     async def check_admin(request: web.Request) -> web.Response | None:
         """Пароль администратора для служебного API. None — пускаем."""
-        ip = client_ip(request, cfg.trust_proxy)
+        ip = client_ip(request, cfg.trust_proxy, cfg.cloud_proxy)
         if not cfg.publish_enabled:
             return _json_error(403, "Не задан ADMIN_PASSWORD.")
+        # Обе проверки — до сравнения пароля: иначе во время блокировки подбор всё равно отличал бы верный пароль
         if auth_fails.blocked(ip):
             return _json_error(429, "Слишком много попыток. Подождите 15 минут.")
+        if auth_total.blocked("all"):
+            return _json_error(429, "Слишком много попыток со всех адресов. Подождите до часа.")
         scheme, _, token = request.headers.get("Authorization", "").partition(" ")
         password = unquote(token.strip()) if scheme.lower() == "bearer" else ""
         if not hmac.compare_digest(password.encode("utf-8"), cfg.admin_password.encode("utf-8")):
             auth_fails.hit(ip)
-            log.warning("%s: неверный пароль администратора", request.path)
+            auth_total.hit("all")
+            log.warning("%s: неверный пароль администратора, адрес %s", request.path, ip)
+            if auth_total.blocked("all"):
+                log.warning("вход администратора закрыт: слишком много неверных паролей")
+                on_admin_action("🚨 Подбор пароля администратора: 30 неверных попыток за час.\n"
+                                "Вход закрыт примерно на час, с верным паролем тоже. Сайт работает как обычно.")
             return _json_error(401, "Неверный пароль.")
         return None
 
     async def order(request: web.Request) -> web.Response:
-        ip = client_ip(request, cfg.trust_proxy)
+        ip = client_ip(request, cfg.trust_proxy, cfg.cloud_proxy)
         if order_limit.blocked(ip) or order_total.blocked("all"):
             return _json_error(429, "Слишком много заявок. Попробуйте позже.")
         if (request.content_length or 0) > MAX_ORDER_BYTES:
@@ -257,7 +380,7 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
 
     async def event(request: web.Request) -> web.Response:
         """Счётчик воронки. Хранится только число событий за день: ни адреса, ни устройства не записываются."""
-        ip = client_ip(request, cfg.trust_proxy)
+        ip = client_ip(request, cfg.trust_proxy, cfg.cloud_proxy)
         if event_limit.blocked(ip):
             return _json_error(429, "Слишком много событий.")
         raw = await _read_limited(request, 1024)
@@ -291,12 +414,27 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
             return _json_error(400, "Это не страница сайта.")
 
         backup = _write_site(cfg.index_file, raw)
-        log.info("сайт обновлён из админки; прежняя версия: %s", backup.name if backup else "нет")
+        ip = client_ip(request, cfg.trust_proxy, cfg.cloud_proxy)
+        previous = backup.name if backup else "нет"
+        digest = hashlib.sha256(raw).hexdigest()[:12]
+        log.info("сайт обновлён из админки: адрес %s, %s байт, sha256 %s; прежняя версия: %s", ip, len(raw), digest, previous)
+        on_admin_action(f"🔐 Сайт опубликован из админки\nАдрес: {ip}\nРазмер: {len(raw)} байт, sha256 {digest}\n"
+                        f"Прежняя версия: {previous}\n\nЕсли это были не вы: смените ADMIN_PASSWORD и верните прежнюю версию.")
+        on_site_changed()                     # сообщить поисковикам о новой версии
         return web.json_response({"ok": True})
 
     app = web.Application(middlewares=[headers], client_max_size=MAX_PUBLISH_BYTES + 1024)
     app.router.add_get("/", index)
     app.router.add_get("/index.html", index)
+    for path in seo.PAGES.values():          # страницы сайта; «/prices/» ведёт на «/prices»
+        if path != "/":
+            app.router.add_get(path, index)
+            app.router.add_get(path + "/", index)
+    app.router.add_get("/robots.txt", robots)
+    app.router.add_get("/sitemap.xml", sitemap)
+    app.router.add_get("/{name:" + VERIFY_FILE + "}", verify_file)
+    app.router.add_get("/brand/{name}", brand)
+    app.router.add_get("/favicon.ico", brand)
     app.router.add_get("/api/health", health)
     app.router.add_get("/api/rate", rate)
     app.router.add_post("/api/order", order)
@@ -304,9 +442,9 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
     app.router.add_post("/api/publish", publish)
     if studio is not None:
         setup_studio(app, store=studio.store, studio=studio.studio, news=studio.news, sites_dir=studio.sites_dir,
-                     check_admin=check_admin, client_ip=lambda request: client_ip(request, cfg.trust_proxy),
+                     check_admin=check_admin, client_ip=lambda request: client_ip(request, cfg.trust_proxy, cfg.cloud_proxy),
                      limiter=lambda limit, window: RateLimiter(limit, window), wake_worker=studio.wake_worker,
-                     wake_news=studio.wake_news)
+                     wake_news=studio.wake_news, on_admin_action=on_admin_action)
     return app
 
 
