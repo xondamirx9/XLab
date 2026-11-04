@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hmac
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -16,6 +17,8 @@ from app.studio.pipeline import Studio
 from app.studio.renderer import site_csp
 from app.studio.spec import slugify
 from app.studio.store import Project, StudioStore
+
+log = logging.getLogger("site.studio")
 
 PAGE = Path(__file__).resolve().parent / "assets" / "council.html"
 SLUG = re.compile(r"^[a-z0-9-]{1,48}$")
@@ -63,7 +66,8 @@ def project_payload(p: Project, public: bool = False) -> dict[str, Any]:
 
 def setup_studio(app: web.Application, *, store: StudioStore, studio: Studio, news: NewsStore | None, sites_dir: Path,
                  check_admin: Callable[[web.Request], Awaitable[web.Response | None]], client_ip: Callable[[web.Request], str],
-                 limiter: Callable[[int, float], Any], wake_worker: Callable[[], None], wake_news: Callable[[], None]) -> None:
+                 limiter: Callable[[int, float], Any], wake_worker: Callable[[], None], wake_news: Callable[[], None],
+                 on_admin_action: Callable[[str], None] = lambda text: None) -> None:
     lead_limit = limiter(5, 600)              # 5 заявок за 10 минут с одного адреса на сайты клиентов
 
     def admin(handler: Callable[[web.Request], Awaitable[web.StreamResponse]]):
@@ -223,6 +227,10 @@ def setup_studio(app: web.Application, *, store: StudioStore, studio: Studio, ne
         body = str((data or {}).get("body") or "")[:3500]
         news_id = await news.add_news(title, body, str((data or {}).get("url") or ""))
         wake_news()
+        ip = client_ip(request)
+        log.info("новость %s поставлена в рассылку через API: адрес %s", news_id, ip)
+        on_admin_action(f"🔐 Новость № {news_id} поставлена в рассылку через API\nАдрес: {ip}\nЗаголовок: {title}\n\n"
+                        "Если это были не вы: смените ADMIN_PASSWORD.")
         return web.json_response({"ok": True, "id": news_id})
 
     async def list_news(request: web.Request) -> web.Response:
