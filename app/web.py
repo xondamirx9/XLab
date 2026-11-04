@@ -275,7 +275,8 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
 
     async def sitemap(request: web.Request) -> web.Response:
         loaded = load_page()
-        xml = seo.sitemap_xml(site_base(request, loaded[1] if loaded else None), loaded[2] if loaded else None)
+        xml = seo.sitemap_xml(site_base(request, loaded[1] if loaded else None), loaded[2] if loaded else None,
+                              loaded[1].hidden if loaded else frozenset())
         return web.Response(text=xml, content_type="application/xml", charset="utf-8", headers={"Cache-Control": "public, max-age=3600"})
 
     async def brand(request: web.Request) -> web.StreamResponse:

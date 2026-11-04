@@ -1,6 +1,6 @@
 """Поисковики: robots.txt, sitemap.xml, страницы сайта и свой адрес у каждой языковой версии.
 
-Сайт — один файл, в нём пять страниц: главная «/», «/prices», «/about», «/brief», «/templates».
+Сайт — один файл, в нём шесть страниц: главная «/», «/examples», «/templates», «/prices», «/about», «/brief».
 Каждый блок разметки помечен списком страниц, на которых он виден (комментарии <!--pg:…-->);
 по адресу страницы сервер отдаёт только её блоки — у каждого адреса своё содержание для поиска.
 Дальше страницу рисует её же код, а переходы между страницами идут без перезагрузки.
@@ -8,7 +8,8 @@
 У каждой страницы три языковые версии: русская — без параметра, узбекская и английская — с
 «?lang=uz» и «?lang=en». Сервер подставляет в <head> язык, заголовок, описание, канонический адрес
 и ссылки hreflang — их видят и поисковики, и превью в мессенджерах. Заголовки и описания всех
-страниц на всех языках страница сама кладёт в блок site-pages при сборке.
+страниц на всех языках страница сама кладёт в блок site-pages при сборке. Страница с пометкой soon
+(заглушка: «Шаблоны», пока шаблонов нет) закрыта от поиска — noindex, нет в sitemap и в IndexNow.
 """
 from __future__ import annotations
 
@@ -20,7 +21,7 @@ from datetime import datetime, timezone
 from xml.sax.saxutils import quoteattr
 
 LANGS = ("ru", "uz", "en")                    # первый — основной, без параметра в адресе
-PAGES = {"home": "/", "prices": "/prices", "about": "/about", "brief": "/brief", "templates": "/templates"}
+PAGES = {"home": "/", "examples": "/examples", "templates": "/templates", "prices": "/prices", "about": "/about", "brief": "/brief"}
 SITE_URL = re.compile(r"https?://[A-Za-z0-9.-]+(:\d{1,5})?(/[A-Za-z0-9._~/-]*)?")
 VERIFY_CODE = re.compile(r"[A-Za-z0-9_-]{8,128}")
 # Закрыто от поиска: служебное API, «Совет агентов» по паролю и страницы проектов клиентов по секретной ссылке.
@@ -40,6 +41,7 @@ class PageMeta:
     titles: dict[str, str] = field(default_factory=dict)            # главная: язык → заголовок
     descriptions: dict[str, str] = field(default_factory=dict)      # главная: язык → описание
     pages: dict[str, dict[str, dict[str, str]]] = field(default_factory=dict)   # страница → язык → {t, d}
+    hidden: frozenset[str] = frozenset()      # заглушки, закрытые от поиска
 
 
 def _json_block(pattern: re.Pattern[str], page: str) -> dict:
@@ -71,9 +73,12 @@ def read_meta(page: str) -> PageMeta:
     descriptions = {"ru": text("texts", "seoDescription"), "uz": text("uz", "seoDescription"),
                     "en": text("en", "seoDescription")}
     pages: dict[str, dict[str, dict[str, str]]] = {}
+    hidden: set[str] = set()
     for name, langs in _json_block(_PAGES_SEO, page).items():
         if name not in PAGES or not isinstance(langs, dict):
             continue
+        if langs.get("soon") and name != "home":
+            hidden.add(name)
         for lang, item in langs.items():
             if lang in LANGS and isinstance(item, dict):
                 entry = {k: _clean(item.get(k)) for k in ("t", "d") if _clean(item.get(k))}
@@ -82,7 +87,7 @@ def read_meta(page: str) -> PageMeta:
     return PageMeta(site=site if SITE_URL.fullmatch(site) else "",
                     titles={k: v for k, v in titles.items() if v},
                     descriptions={k: v for k, v in descriptions.items() if v},
-                    pages=pages)
+                    pages=pages, hidden=frozenset(hidden))
 
 
 def page_of_path(path: str) -> str:
@@ -139,6 +144,8 @@ def localize_page(document: str, lang: str, meta: PageMeta, verify: dict[str, st
         links = "".join(f'<link rel="alternate" hreflang="{code}" href="{attr(page_url(meta.site, code, page))}">\n' for code in LANGS)
         links += f'<link rel="alternate" hreflang="x-default" href="{attr(page_url(meta.site, LANGS[0], page))}">\n'
         head = re.sub(r'(?:<link rel="alternate" hreflang="[^"]*" href="[^"]*">\n)+', lambda _: links, head, count=1)
+    if page in meta.hidden:                   # заглушка: в поиск не берём, ссылки с неё — да
+        head = re.sub(r'<meta name="robots" content="[^"]*">', '<meta name="robots" content="noindex, follow">', head, count=1)
     for name, code in (verify or {}).items():
         head += f'<meta name="{html.escape(name, quote=True)}" content="{html.escape(code, quote=True)}">\n'
 
@@ -151,17 +158,17 @@ def robots_txt(base: str) -> str:
     return "\n".join(lines)
 
 
-def all_urls(base: str) -> list[str]:
-    """Все адреса сайта: пять страниц на трёх языках."""
-    return [page_url(base, lang, page) for page in PAGES for lang in LANGS]
+def all_urls(base: str, hidden: frozenset[str] | set[str] = frozenset()) -> list[str]:
+    """Адреса сайта для поиска: страницы на трёх языках, кроме заглушек."""
+    return [page_url(base, lang, page) for page in PAGES if page not in hidden for lang in LANGS]
 
 
-def sitemap_xml(base: str, modified: float | None = None) -> str:
-    """Пять страниц на трёх языках; у каждого адреса — ссылки на две другие версии этой страницы (hreflang)
-    и на основную для остальных языков."""
+def sitemap_xml(base: str, modified: float | None = None, hidden: frozenset[str] | set[str] = frozenset()) -> str:
+    """Страницы на трёх языках, кроме заглушек; у каждого адреса — ссылки на две другие версии этой страницы
+    (hreflang) и на основную для остальных языков."""
     lastmod = datetime.fromtimestamp(modified, timezone.utc).strftime("%Y-%m-%d") if modified else ""
     urls = []
-    for page in PAGES:
+    for page in (name for name in PAGES if name not in hidden):
         links = "".join(f"    <xhtml:link rel=\"alternate\" hreflang=\"{lang}\" href={quoteattr(page_url(base, lang, page))}/>\n" for lang in LANGS)
         links += f"    <xhtml:link rel=\"alternate\" hreflang=\"x-default\" href={quoteattr(page_url(base, LANGS[0], page))}/>\n"
         for lang in LANGS:

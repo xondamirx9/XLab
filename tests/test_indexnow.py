@@ -61,7 +61,7 @@ class KeyTest(unittest.TestCase):
         self.assertRegex(key, r"^[0-9a-f]{32}$")
 
     def test_payload(self) -> None:
-        data = indexnow.payload("https://codexlab.uz", KEY)
+        data = indexnow.payload("https://codexlab.uz", KEY, frozenset({"templates"}))
         self.assertEqual((data["host"], data["key"], data["keyLocation"]), ("codexlab.uz", KEY, f"https://codexlab.uz/{KEY}.txt"))
         self.assertEqual(len(data["urlList"]), 15)                   # пять страниц на трёх языках
         for url in ("https://codexlab.uz/", "https://codexlab.uz/?lang=uz", "https://codexlab.uz/prices", "https://codexlab.uz/about?lang=en"):
@@ -105,7 +105,8 @@ class IndexNowCase(unittest.IsolatedAsyncioTestCase):
         pinger = IndexNow(self.config(), endpoint=self.endpoint, start_delay=0.05)
         await self.run_for(pinger, 0.3)
         self.assertEqual(pinger.sent, 1)
-        self.assertEqual(self.fake.calls, [indexnow.payload("https://codexlab.uz", KEY)])
+        self.assertEqual(self.fake.calls, [indexnow.payload("https://codexlab.uz", KEY, frozenset({"templates"}))])
+        self.assertNotIn("https://codexlab.uz/templates", self.fake.calls[0]["urlList"])   # заглушку не отправляем
 
     async def test_wake_after_sleep_is_not_sent(self) -> None:
         self.age(2 * 3600)                      # бесплатный Render проснулся: версия старая
