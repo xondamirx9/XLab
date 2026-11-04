@@ -26,6 +26,7 @@ log = logging.getLogger("site.bot")
 
 MAX_ATTEMPTS = 30            # после этого заявка остаётся в базе, но пересылать её перестаём
 RETRY_EVERY = 60             # секунд между повторными попытками
+PURGE_EVERY = 3600           # секунд между проверками срока хранения заявок
 MAX_ALERTS = 50              # столько служебных уведомлений ждут, пока Telegram недоступен
 MESSAGE_LIMIT = 3900         # у Telegram предел 4096 знаков в сообщении
 TASHKENT = timezone(timedelta(hours=5))
@@ -135,13 +136,32 @@ class Notifier:
             done += int(delivered)
         return done
 
+    async def purge_expired(self) -> int:
+        """Удаляет заявки старше срока хранения (ORDER_RETENTION_DAYS). Срок 0 — ничего не удаляет."""
+        days = self._cfg.order_retention_days
+        if days <= 0:
+            return 0
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(timespec="seconds")
+        removed = await self._storage.purge_older(cutoff)
+        if removed:
+            log.info("удалено заявок старше %s дн.: %s", days, removed)
+        return removed
+
     async def run(self, stop: asyncio.Event) -> None:
+        loop = asyncio.get_running_loop()
+        next_purge = 0.0
         while not stop.is_set():
             try:
                 await self.deliver_alerts()
                 await self.deliver_pending()
             except Exception:                 # цикл доставки не должен умирать из-за одной ошибки
                 log.exception("сбой при пересылке заявок")
+            if loop.time() >= next_purge:     # срок хранения проверяем раз в час
+                next_purge = loop.time() + PURGE_EVERY
+                try:
+                    await self.purge_expired()
+                except Exception:
+                    log.exception("сбой при удалении старых заявок")
             self._wake.clear()
             waiters = [asyncio.create_task(self._wake.wait()), asyncio.create_task(stop.wait())]
             _, pending = await asyncio.wait(waiters, timeout=RETRY_EVERY, return_when=asyncio.FIRST_COMPLETED)
@@ -227,7 +247,8 @@ def build_dispatcher(cfg: Config, storage: Storage, *, news: NewsStore | None = 
     dispatcher.include_router(router)
     # Тарифы и конструктор ТЗ — раньше студии: их состояния и /cancel должны срабатывать первыми
     dispatcher.include_router(build_brief_router(cfg.admin_users, storage, SitePricing(cfg.index_file), prefs, rates=rates,
-                                                 wake_orders=wake_orders, studio=has_studio, news=news is not None))
+                                                 wake_orders=wake_orders, studio=has_studio, news=news is not None,
+                                                 privacy_url=f"{cfg.public_url}/#privacy" if cfg.public_url else ""))
     if news is not None or studio_store is not None:
         dispatcher.include_router(build_user_router(cfg, news=news, store=studio_store, studio=studio,
                                                     wake_worker=wake_worker, wake_news=wake_news))

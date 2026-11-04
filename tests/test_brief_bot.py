@@ -213,7 +213,8 @@ class BriefBotCase(TelegramCase):
         await self.feed(contact(0, chat, "998901234567"))
         summary = self.last(chat)["text"]
         for part in ("ТЗ готово", "Компания: Tabassum", "О бизнесе: уточним вместе", "Языки: Русский, O‘zbekcha",
-                     "Контакт: Нигора, +998901234567", "Ориентир: 6–16 млн сум, 1–3 недели"):
+                     "Контакт: Нигора, +998901234567", "Ориентир: 6–16 млн сум, 1–3 недели",
+                     "соглашаетесь на обработку персональных данных", "«Политика конфиденциальности»"):   # согласие по ЗРУ-547
             self.assertIn(part, summary)
         await self.feed(press(0, chat, "cur:usd:sum"))
         self.assertIn("Ориентир: 470–1\u00a0250 USD", self.last(chat)["text"])

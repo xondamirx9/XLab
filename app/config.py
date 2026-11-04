@@ -44,6 +44,7 @@ class Config:
     data_dir: Path
     trust_proxy: bool
     cloud_proxy: bool = False            # за прокси облачной платформы (Render): адрес посетителя — из X-Forwarded-For
+    order_retention_days: int = 180      # срок хранения заявок; столько же обещает политика конфиденциальности. 0 — не удалять
     # студия white-label сайтов и новости
     public_url: str = ""                 # адрес сервера снаружи, для ссылок в Telegram: https://codexlab.uz
     studio_enabled: bool = True
@@ -156,6 +157,7 @@ class Config:
             trust_proxy=proxy not in ("0", "false", "no", ""),
             cloud_proxy=proxy == "cloud",
             public_url=public_url,
+            order_retention_days=number("ORDER_RETENTION_DAYS", 180, 0, 3650),
             studio_enabled=env("STUDIO_ENABLED", "1").strip() not in ("0", "false", "no"),
             claude_enabled=bool(env("ANTHROPIC_API_KEY", "").strip()) and env("STUDIO_OFFLINE", "0").strip() in ("0", ""),
             studio_model=env("STUDIO_MODEL", "claude-opus-5-5").strip() or "claude-opus-5-5",

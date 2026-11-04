@@ -348,6 +348,15 @@ T: dict[str, tuple[str, str, str]] = {
              "⚠️ Above your budget — we’ll propose a first version that fits it."),
     "open_q": ("Открытых вопросов: {n} — разберём при первом контакте.", "Ochiq savollar: {n} ta — birinchi muloqotda hal qilamiz.",
                "Open questions: {n} — we’ll go through them when we first talk."),
+    "consent": ("Нажимая «Отправить заявку», вы соглашаетесь на обработку персональных данных и их передачу через Telegram "
+                "по политике конфиденциальности: {url}",
+                "«Arizani yuborish» tugmasini bosib, shaxsga doir ma’lumotlaringizga ishlov berish va ularni Telegram orqali "
+                "uzatishga maxfiylik siyosati bo‘yicha rozilik bildirasiz: {url}",
+                "By tapping “Send request”, you agree to the processing of your personal data and its transfer via Telegram "
+                "under our privacy policy: {url}"),
+    "consent_site": ("сайт студии, ссылка «Политика конфиденциальности» внизу страницы",
+                     "studiya sayti, sahifa pastidagi «Maxfiylik siyosati» havolasi",
+                     "the studio website, “Privacy policy” link at the bottom of the page"),
     "btn_send": ("✅ Отправить заявку", "✅ Arizani yuborish", "✅ Send request"),
     "btn_restart": ("🔄 Начать заново", "🔄 Boshidan boshlash", "🔄 Start over"),
     "sent": ("✅ Заявка № {n} отправлена! Студия получила ТЗ и ответит в течение рабочего дня.",
@@ -697,7 +706,8 @@ def steps_for(kind: str) -> list[str]:
 
 
 def build_brief_router(cfg_admins: tuple[int, ...], storage: Storage, pricing: SitePricing, prefs: ChatPrefs, *,
-                       rates: RateService | None, wake_orders: Callable[[], None], studio: bool, news: bool) -> Router:
+                       rates: RateService | None, wake_orders: Callable[[], None], studio: bool, news: bool,
+                       privacy_url: str = "") -> Router:
     router = Router()
     order_limit = RateLimiter(limit=3, window=3600)           # не больше трёх заявок из бота в час с одного чата
 
@@ -1031,6 +1041,7 @@ def build_brief_router(cfg_admins: tuple[int, ...], storage: Storage, pricing: S
         if cur == "usd":
             lines.append(rate_text(rate, lang))
         lines += ["", t("open_q", lang, n=len(open_questions(data, est)))]
+        lines += ["", t("consent", lang, url=privacy_url or t("consent_site", lang))]   # согласие по ЗРУ-547
         markup = kb([[(t("btn_send", lang), "b:send")], [currency_button(lang, cur, "sum")], [(t("btn_restart", lang), "menu:brief")]])
         return "\n".join(lines), markup
 
