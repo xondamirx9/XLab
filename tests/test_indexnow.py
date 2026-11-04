@@ -61,11 +61,15 @@ class KeyTest(unittest.TestCase):
         self.assertRegex(key, r"^[0-9a-f]{32}$")
 
     def test_payload(self) -> None:
-        data = indexnow.payload("https://codexlab.uz", KEY, frozenset({"partners"}))   # как на сайте: «Партнёры» пока пустые
+        data = indexnow.payload("https://codexlab.uz", KEY)
         self.assertEqual((data["host"], data["key"], data["keyLocation"]), ("codexlab.uz", KEY, f"https://codexlab.uz/{KEY}.txt"))
-        self.assertEqual(len(data["urlList"]), 15)                   # пять страниц на трёх языках
-        for url in ("https://codexlab.uz/", "https://codexlab.uz/?lang=uz", "https://codexlab.uz/prices", "https://codexlab.uz/about?lang=en"):
+        self.assertEqual(len(data["urlList"]), 18)                   # шесть страниц на трёх языках
+        for url in ("https://codexlab.uz/", "https://codexlab.uz/?lang=uz", "https://codexlab.uz/prices", "https://codexlab.uz/about?lang=en",
+                    "https://codexlab.uz/partners?lang=uz"):
             self.assertIn(url, data["urlList"])
+        hidden = indexnow.payload("https://codexlab.uz", KEY, frozenset({"partners"}))   # пустую пока страницу не отправляем
+        self.assertEqual(len(hidden["urlList"]), 15)
+        self.assertNotIn("https://codexlab.uz/partners", hidden["urlList"])
 
 
 class IndexNowCase(unittest.IsolatedAsyncioTestCase):
@@ -105,8 +109,8 @@ class IndexNowCase(unittest.IsolatedAsyncioTestCase):
         pinger = IndexNow(self.config(), endpoint=self.endpoint, start_delay=0.05)
         await self.run_for(pinger, 0.3)
         self.assertEqual(pinger.sent, 1)
-        self.assertEqual(self.fake.calls, [indexnow.payload("https://codexlab.uz", KEY, frozenset({"partners"}))])
-        self.assertNotIn("https://codexlab.uz/partners", self.fake.calls[0]["urlList"])   # пустую страницу не отправляем
+        self.assertEqual(self.fake.calls, [indexnow.payload("https://codexlab.uz", KEY)])
+        self.assertIn("https://codexlab.uz/partners", self.fake.calls[0]["urlList"])   # «Партнёры» уже не пустые
 
     async def test_wake_after_sleep_is_not_sent(self) -> None:
         self.age(2 * 3600)                      # бесплатный Render проснулся: версия старая
