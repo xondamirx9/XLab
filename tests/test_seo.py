@@ -59,6 +59,20 @@ class StructuredDataTest(unittest.TestCase):
         self.assertEqual(org["alternateName"], ["codexlab", "codexlab.uz"])
         self.assertEqual(org["logo"], "https://codexlab.uz/brand/logo-for-light.png")
         self.assertNotIn("sameAs", org)                                          # Telegram в контактах пока не указан
+        self.assertEqual(org["address"], {"@type": "PostalAddress", "streetAddress": "ул. Кораташ, 106", "addressLocality": "Ташкент",
+                                          "postalCode": "100021", "addressCountry": "UZ"})
+        self.assertEqual(org["geo"], {"@type": "GeoCoordinates", "latitude": 41.3141551, "longitude": 69.2376133})
+        self.assertEqual(org["hasMap"], "https://maps.app.goo.gl/rtPo7oZBKVTv1oSXA")
+
+    def test_about_page_has_address_and_map(self) -> None:
+        page = seo.localize_page(SITE, "ru", seo.read_meta(SITE), page="about")
+        markup = page.partition("</head>")[2].partition('<script type="application/json" id="site-data">')[0]
+        self.assertIn("ул. Кораташ, 106", markup)
+        self.assertIn('<iframe src="https://www.google.com/maps?q=41.3141551,69.2376133&amp;z=17&amp;hl=ru&amp;output=embed"', markup)
+        self.assertIn('href="https://www.google.com/maps/dir/?api=1&amp;destination=41.3141551,69.2376133"', markup)
+        self.assertIn('href="https://maps.app.goo.gl/rtPo7oZBKVTv1oSXA"', markup)
+        home = seo.localize_page(SITE, "ru", seo.read_meta(SITE), page="home")
+        self.assertNotIn("<iframe", home.partition("</head>")[2].partition('<script type="application/json" id="site-data">')[0])   # карта — только на «О нас»
 
 
 class LocalizeTest(unittest.TestCase):
@@ -85,7 +99,7 @@ class LocalizeTest(unittest.TestCase):
         meta = seo.read_meta(SITE)
         expect = {"home": ["top", "value", "examples", "projects", "process", "priceTeaser", "final"],
                   "examples": ["examplesHead", "examples", "templates", "final"],
-                  "about": ["about", "projects", "process", "faq", "final"],
+                  "about": ["about", "projects", "process", "location", "faq", "final"],
                   "partners": ["partnersHead", "partnerList", "final"],
                   "prices": ["pricesHead", "prices", "faq", "final"],
                   "brief": ["briefHead", "brief", "faq"]}
