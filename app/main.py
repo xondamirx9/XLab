@@ -19,6 +19,7 @@ from app.db import Database
 from app.indexnow import IndexNow
 from app.news import Broadcaster, NewsStore
 from app.rates import RateService
+from app.site_content import SiteContent, SiteStore
 from app.storage import Storage
 from app.studio.llm import LLMFactory
 from app.studio.pipeline import Studio
@@ -43,6 +44,7 @@ async def run(cfg: Config) -> None:
 async def serve(cfg: Config, db: Database) -> None:
     storage = Storage(db)
     news = NewsStore(db)
+    site = SiteContent(cfg.index_file, SiteStore(db))  # вёрстка из site/index.html, тексты и цены — из базы
     rates = RateService(cfg.data_dir / "rate.json")     # курс доллара NBU для цен в USD на сайте и в боте
 
     bot = Bot(cfg.bot_token, default=DefaultBotProperties(parse_mode=None)) if cfg.bot_token else None
@@ -62,9 +64,9 @@ async def serve(cfg: Config, db: Database) -> None:
                                    wake_news=broadcaster.wake, claude=cfg.claude_enabled)
         log.info("студия: %s", f"агенты думают через {cfg.studio_model}" if cfg.claude_enabled
                  else "офлайн-режим (нет ANTHROPIC_API_KEY): сайты собираются без нейросети")
-    indexnow = IndexNow(cfg)              # сообщать Bing и Яндексу о новой версии сайта
+    indexnow = IndexNow(cfg, site=site)   # сообщать Bing и Яндексу о новой версии сайта
     app = create_app(cfg, storage, on_new_order=notifier.wake, bot_enabled=bot is not None, studio=studio_ctx, rates=rates,
-                     on_site_changed=indexnow.wake, on_admin_action=notifier.alert)
+                     on_site_changed=indexnow.wake, on_admin_action=notifier.alert, site=site)
 
     runner = web.AppRunner(app, access_log=None)
     await runner.setup()
@@ -97,7 +99,7 @@ async def serve(cfg: Config, db: Database) -> None:
     if bot is not None:
         dispatcher = build_dispatcher(cfg, storage, news=news, studio_store=studio_store, studio=studio,
                                       wake_news=broadcaster.wake, wake_worker=worker.wake if worker else (lambda: None),
-                                      rates=rates, wake_orders=notifier.wake)
+                                      rates=rates, wake_orders=notifier.wake, site=site)
         await set_commands(bot, studio=studio_store is not None)
         tasks.append(asyncio.create_task(dispatcher.start_polling(bot, handle_signals=False)))
 

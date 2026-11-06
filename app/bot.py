@@ -14,6 +14,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, Message
 
 from app.brief_bot import ChatPrefs, SitePricing, build_brief_router, main_menu, welcome_text
+from app.site_content import SiteContent, SiteStore
 from app.config import Config
 from app.news import NewsStore
 from app.rates import RateService
@@ -172,7 +173,7 @@ class Notifier:
 def build_dispatcher(cfg: Config, storage: Storage, *, news: NewsStore | None = None, studio_store: StudioStore | None = None,
                      studio: Studio | None = None, wake_news: Callable[[], None] = lambda: None,
                      wake_worker: Callable[[], None] = lambda: None, rates: RateService | None = None,
-                     wake_orders: Callable[[], None] = lambda: None) -> Dispatcher:
+                     wake_orders: Callable[[], None] = lambda: None, site: SiteContent | None = None) -> Dispatcher:
     router = Router()
     is_admin = lambda message: cfg.is_admin(message.chat.id, message.from_user.id if message.from_user else None)
     prefs = ChatPrefs()                       # язык и валюта, которые выбрал человек
@@ -246,7 +247,7 @@ def build_dispatcher(cfg: Config, storage: Storage, *, news: NewsStore | None = 
     dispatcher = Dispatcher()
     dispatcher.include_router(router)
     # Тарифы и конструктор ТЗ — раньше студии: их состояния и /cancel должны срабатывать первыми
-    dispatcher.include_router(build_brief_router(cfg.admin_users, storage, SitePricing(cfg.index_file), prefs, rates=rates,
+    dispatcher.include_router(build_brief_router(cfg.admin_users, storage, SitePricing(site or SiteContent(cfg.index_file, SiteStore(storage.db))), prefs, rates=rates,
                                                  wake_orders=wake_orders, studio=has_studio, news=news is not None,
                                                  privacy_url=f"{cfg.public_url}/#privacy" if cfg.public_url else ""))
     if news is not None or studio_store is not None:
