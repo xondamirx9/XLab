@@ -11,7 +11,6 @@ import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Awaitable, Callable
 from urllib.parse import unquote
 
@@ -51,7 +50,6 @@ class StudioContext:
     store: StudioStore
     studio: Studio
     news: NewsStore | None
-    sites_dir: Path
     wake_worker: Callable[[], None]
     wake_news: Callable[[], None]
     claude: bool = False
@@ -169,11 +167,18 @@ def _rate_key(address: str) -> str:
     return str(ip)
 
 
-def client_ip(request: web.Request, trust_proxy: bool, cloud_proxy: bool = False) -> str:
+def _from_trusted(address: str | None, trusted: tuple[str, ...]) -> bool:
+    ip = _parse_ip(address or "")
+    return ip is not None and any(ip in ipaddress.ip_network(net, strict=False) for net in trusted
+                                  if ipaddress.ip_network(net, strict=False).version == ip.version)
+
+
+def client_ip(request: web.Request, trust_proxy: bool, cloud_proxy: bool = False, trusted: tuple[str, ...] = ()) -> str:
     """Адрес клиента — ключ для ограничений частоты."""
-    # X-Forwarded-For читаем, только если запрос пришёл от прокси на этой же машине (Caddy или nginx по README).
-    # Иначе, если сервер случайно открыт наружу напрямую, клиент подставил бы любой адрес и обошёл все лимиты.
-    if trust_proxy and _is_loopback(request.remote):
+    # X-Forwarded-For читаем, только если запрос пришёл от своего прокси: на этой же машине (Caddy или nginx по README)
+    # или с машины из TRUSTED_PROXIES (Caddy машины сайта для машины админки). Иначе, если сервер случайно открыт
+    # наружу напрямую, клиент подставил бы любой адрес и обошёл все лимиты.
+    if trust_proxy and (_is_loopback(request.remote) or _from_trusted(request.remote, trusted)):
         forwarded = request.headers.get("X-Forwarded-For", "")
         if forwarded:
             # Берём последний адрес: его дописал наш собственный прокси. Первые значения клиент может подделать.
@@ -300,7 +305,7 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
 
     async def health(request: web.Request) -> web.Response:
         live = await site.page()
-        data = {"app": "codexlab-site", "ok": True, "publish": cfg.publish_enabled, "bot": bot_enabled,
+        data = {"app": "codexlab-site", "ok": True, "role": cfg.role, "publish": cfg.publish_enabled, "bot": bot_enabled,
                 "site": live.source if live else "none"}
         if studio is not None:
             data["studio"] = "claude" if studio.claude else "offline"
@@ -316,7 +321,7 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
 
     async def check_admin(request: web.Request) -> web.Response | None:
         """Пароль администратора для служебного API. None — пускаем."""
-        ip = client_ip(request, cfg.trust_proxy, cfg.cloud_proxy)
+        ip = client_ip(request, cfg.trust_proxy, cfg.cloud_proxy, cfg.trusted_proxies)
         if not cfg.publish_enabled:
             return _json_error(403, "Не задан ADMIN_PASSWORD.")
         # Обе проверки — до сравнения пароля: иначе во время блокировки подбор всё равно отличал бы верный пароль
@@ -338,7 +343,7 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
         return None
 
     async def order(request: web.Request) -> web.Response:
-        ip = client_ip(request, cfg.trust_proxy, cfg.cloud_proxy)
+        ip = client_ip(request, cfg.trust_proxy, cfg.cloud_proxy, cfg.trusted_proxies)
         if order_limit.blocked(ip) or order_total.blocked("all"):
             return _json_error(429, "Слишком много заявок. Попробуйте позже.")
         if (request.content_length or 0) > MAX_ORDER_BYTES:
@@ -383,7 +388,7 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
 
     async def event(request: web.Request) -> web.Response:
         """Счётчик воронки. Хранится только число событий за день: ни адреса, ни устройства не записываются."""
-        ip = client_ip(request, cfg.trust_proxy, cfg.cloud_proxy)
+        ip = client_ip(request, cfg.trust_proxy, cfg.cloud_proxy, cfg.trusted_proxies)
         if event_limit.blocked(ip):
             return _json_error(429, "Слишком много событий.")
         raw = await _read_limited(request, 1024)
@@ -420,7 +425,7 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
             number, whole = await site.publish(html)
         except ValueError:
             return _json_error(400, "В странице нет данных сайта.")
-        ip = client_ip(request, cfg.trust_proxy, cfg.cloud_proxy)
+        ip = client_ip(request, cfg.trust_proxy, cfg.cloud_proxy, cfg.trusted_proxies)
         digest = hashlib.sha256(raw).hexdigest()[:12]
         kept = "страница целиком" if whole else "только тексты и цены: админка была открыта на прежней версии сайта"
         log.info("сайт обновлён из админки: публикация №%s (%s), адрес %s, %s байт, sha256 %s", number, kept, ip, len(raw), digest)
@@ -430,27 +435,33 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
         on_site_changed()                     # сообщить поисковикам о новой версии
         return web.json_response({"ok": True})
 
+    # Роль (ROLE): web отвечает только посетителям, admin — только админке и служебному API, all — на всё.
+    # На двух машинах Caddy машины сайта пересылает адреса админки на машину админки (deploy/uzcloud/Caddyfile);
+    # здесь чужие адреса даже не заведены — промах в Caddy даст 404, а не админку снаружи.
+    public, admin = cfg.role in ("all", "web"), cfg.role in ("all", "admin")
     app = web.Application(middlewares=[headers], client_max_size=MAX_PUBLISH_BYTES + 1024)
-    app.router.add_get("/", index)
-    app.router.add_get("/index.html", index)
-    for path in seo.PAGES.values():          # страницы сайта; «/prices/» ведёт на «/prices»
-        if path != "/":
-            app.router.add_get(path, index)
-            app.router.add_get(path + "/", index)
-    app.router.add_get("/robots.txt", robots)
-    app.router.add_get("/sitemap.xml", sitemap)
-    app.router.add_get("/{name:" + VERIFY_FILE + "}", verify_file)
-    app.router.add_get("/brand/{name}", brand)
-    app.router.add_get("/favicon.ico", brand)
     app.router.add_get("/api/health", health)
-    app.router.add_get("/api/rate", rate)
-    app.router.add_post("/api/order", order)
-    app.router.add_post("/api/event", event)
-    app.router.add_post("/api/publish", publish)
+    if public:
+        app.router.add_get("/", index)
+        app.router.add_get("/index.html", index)
+        for path in seo.PAGES.values():          # страницы сайта; «/prices/» ведёт на «/prices»
+            if path != "/":
+                app.router.add_get(path, index)
+                app.router.add_get(path + "/", index)
+        app.router.add_get("/robots.txt", robots)
+        app.router.add_get("/sitemap.xml", sitemap)
+        app.router.add_get("/{name:" + VERIFY_FILE + "}", verify_file)
+        app.router.add_get("/brand/{name}", brand)
+        app.router.add_get("/favicon.ico", brand)
+        app.router.add_get("/api/rate", rate)
+        app.router.add_post("/api/order", order)
+        app.router.add_post("/api/event", event)
+    if admin:
+        app.router.add_post("/api/publish", publish)
     if studio is not None:
-        setup_studio(app, store=studio.store, studio=studio.studio, news=studio.news, sites_dir=studio.sites_dir,
-                     check_admin=check_admin, client_ip=lambda request: client_ip(request, cfg.trust_proxy, cfg.cloud_proxy),
+        setup_studio(app, store=studio.store, studio=studio.studio, news=studio.news,
+                     check_admin=check_admin, client_ip=lambda request: client_ip(request, cfg.trust_proxy, cfg.cloud_proxy, cfg.trusted_proxies),
                      limiter=lambda limit, window: RateLimiter(limit, window), wake_worker=studio.wake_worker,
-                     wake_news=studio.wake_news, on_admin_action=on_admin_action)
+                     wake_news=studio.wake_news, on_admin_action=on_admin_action, public=public, admin=admin)
     return app
 

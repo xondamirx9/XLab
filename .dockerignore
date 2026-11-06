@@ -1,0 +1,17 @@
+# В образ попадают только requirements.txt, app/ и site/ (см. Dockerfile).
+# Остальное — мимо: настройки с паролями, данные, кэши, история git.
+.env
+.env.*
+!.env.example
+.git
+data/
+venv/
+.venv/
+**/__pycache__
+**/*.pyc
+.mypy_cache
+.ruff_cache
+tests/
+docs/
+deploy/
+site/backups/

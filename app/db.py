@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime, timezone
 from typing import Any, Callable, TypeVar, cast
 
@@ -16,6 +17,8 @@ from psycopg_pool import ConnectionPool
 
 T = TypeVar("T")
 Conn = psycopg.Connection[dict[str, Any]]
+log = logging.getLogger("site.db")
+CHANNEL = "codexlab"                 # канал NOTIFY: машина сайта будит машину админки (новая заявка и т. п.)
 
 # Время везде — строка ISO в UTC, как раньше в SQLite. Столбцы времени сравниваются побайтно (COLLATE "C"),
 # поэтому «раньше / позже» и сортировка работают так же, при любом языке базы.
@@ -163,10 +166,22 @@ CREATE TABLE site_publications (
 );
 """
 
+# Сайты клиентов, которые собирает студия: каждая версия — строка. Так их видят обе машины без общей папки.
+SCHEMA_V3 = """
+CREATE TABLE studio_sites (
+    project_id  bigint NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    version     integer NOT NULL,                  -- /sites/<slug>/v<версия>; последняя — по /sites/<slug>/
+    html        text NOT NULL,
+    created_at  text COLLATE "C" NOT NULL,
+    PRIMARY KEY (project_id, version)
+);
+"""
+
 # Новый шаг схемы — новая строка в конце: (следующий номер, SQL). Сделанные шаги не правятся.
 MIGRATIONS: tuple[tuple[int, str], ...] = (
     (1, SCHEMA_V1),
     (2, SCHEMA_V2),
+    (3, SCHEMA_V3),
 )
 
 _MIGRATE_LOCK = 724_201_101          # номер блокировки: два сервера не меняют схему одновременно
@@ -198,10 +213,39 @@ class Database:
         self._pool = ConnectionPool(url, min_size=1, max_size=max_size, open=False, timeout=30,
                                     kwargs={"row_factory": dict_row, "application_name": "codexlab"})
 
-    async def open(self) -> list[int]:
-        """Открывает пул и доводит схему до последней версии. Возвращает номера сделанных сейчас шагов."""
+    async def open(self, migrate: bool = True) -> list[int]:
+        """Открывает пул и (migrate) доводит схему до последней версии. Возвращает номера сделанных сейчас шагов.
+        На двух машинах схему меняет только машина админки, машина сайта ждёт её — wait_schema()."""
         await asyncio.to_thread(self._pool.open, wait=True, timeout=30)
-        return await self.migrate()
+        return await self.migrate() if migrate else []
+
+    async def schema_version(self) -> int:
+        """Последний сделанный шаг схемы; 0 — схемы ещё нет."""
+        def work(conn: Conn) -> int:
+            if conn.execute("SELECT to_regclass('schema_migrations') AS t").fetchone() == {"t": None}:
+                return 0
+            row = conn.execute("SELECT COALESCE(MAX(version), 0) AS v FROM schema_migrations").fetchone()
+            return int(row["v"]) if row else 0
+        return await self.run(work)
+
+    async def wait_schema(self, timeout: float = 120, every: float = 2) -> bool:
+        """Ждёт, пока машина админки доведёт схему до версии этого кода. False — не дождались."""
+        needed = MIGRATIONS[-1][0]
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        said = False
+        while (version := await self.schema_version()) < needed:
+            if not said:
+                log.info("схема базы — шаг %s, этой версии сайта нужен %s: ждём, пока её обновит машина админки", version, needed)
+                said = True
+            if loop.time() >= deadline:
+                return False
+            await asyncio.sleep(every)
+        return True
+
+    async def notify(self, event: str) -> None:
+        """Событие для других машин: его получит Listener (машина админки)."""
+        await self.run(lambda conn: conn.execute("SELECT pg_notify(%s, %s)", (CHANNEL, event)))
 
     async def close(self) -> None:
         await asyncio.to_thread(self._pool.close)
@@ -215,6 +259,43 @@ class Database:
             with self._pool.connection() as conn:     # без ошибки — сохранить, с ошибкой — откатить
                 return work(cast(Conn, conn))         # строки — словари: row_factory=dict_row в пуле
         return await asyncio.to_thread(call)
+
+
+class Listener:
+    """Слушает события других машин (LISTEN codexlab) и будит нужные задачи.
+
+    Связь с базой пропала — переподключается и на всякий случай будит всех: события, пришедшие без него,
+    иначе дождались бы только обычного опроса (заявки — раз в минуту, студия — раз в 30 секунд).
+    """
+
+    def __init__(self, url: str, handlers: dict[str, Callable[[], None]], retry: float = 5.0) -> None:
+        self._url, self._handlers, self._retry = url, handlers, retry
+        self.ready = asyncio.Event()              # подписка действует — для проверок
+
+    def _wake_all(self) -> None:
+        for handler in self._handlers.values():
+            handler()
+
+    async def run(self, stop: asyncio.Event) -> None:
+        while not stop.is_set():
+            try:
+                async with await psycopg.AsyncConnection.connect(self._url, autocommit=True,
+                                                                 application_name="codexlab-listen") as conn:
+                    await conn.execute(f"LISTEN {CHANNEL}")
+                    self.ready.set()
+                    self._wake_all()
+                    while not stop.is_set():
+                        async for note in conn.notifies(timeout=1.0):
+                            handler = self._handlers.get(note.payload)
+                            if handler is not None:
+                                handler()
+            except (psycopg.Error, OSError) as exc:
+                log.warning("события других машин: нет связи с базой (%s), переподключаюсь", type(exc).__name__)
+            self.ready.clear()
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=self._retry)
+            except asyncio.TimeoutError:
+                pass
 
 
 class PgStore:

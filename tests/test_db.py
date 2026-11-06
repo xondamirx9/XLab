@@ -145,6 +145,25 @@ class ImportCase(unittest.IsolatedAsyncioTestCase):
                                                   project="Магазин", estimate="от 9 млн", text="ТЗ", brief_json="{}")
         self.assertEqual((number, created), (6, True))                  # номера заявок продолжаются, а не начинаются с 1
 
+    async def test_import_moves_client_sites_into_database(self) -> None:
+        with sqlite3.connect(self.root / "studio.sqlite3") as conn:
+            conn.execute("CREATE TABLE projects (id INTEGER PRIMARY KEY, token TEXT, slug TEXT, status TEXT, brief_json TEXT, "
+                         "version INTEGER, created_at TEXT, updated_at TEXT)")
+            conn.execute("INSERT INTO projects VALUES (3, 'tok', 'bakery', 'done', '{}', 2, '2026-10-01', '2026-10-02')")
+        sqlite3.connect(self.root / "studio.sqlite3").close()
+        folder = self.root / "sites" / "bakery"
+        folder.mkdir(parents=True)
+        for name, text in (("v1.html", "<p>первая</p>"), ("v2.html", "<p>вторая</p>"), ("index.html", "<p>вторая</p>")):
+            (folder / name).write_text(text, encoding="utf-8")
+        (self.root / "sites" / "nobody").mkdir()
+        (self.root / "sites" / "nobody" / "v1.html").write_text("<p>без проекта</p>", encoding="utf-8")
+        counts = await import_folder(self.db, self.root)
+        self.assertEqual(counts, {"projects": 1, "studio_sites": 2})    # index.html — копия последней версии, не нужен
+        studio = StudioStore(self.db)
+        self.assertEqual(await studio.site_html("bakery"), "<p>вторая</p>")
+        self.assertEqual(await studio.site_html("bakery", 1), "<p>первая</p>")
+        self.assertIsNone(await studio.site_html("nobody", 1))
+
     async def test_import_refuses_folder_without_files(self) -> None:
         with self.assertRaises(ImportRefused):
             await import_folder(self.db, self.root)

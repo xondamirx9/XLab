@@ -318,6 +318,23 @@ class StudioStore(PgStore):
             return [dict(r) for r in conn.execute("SELECT * FROM lessons ORDER BY active DESC, score DESC, id DESC LIMIT %s", (limit,))]
         return await self._run(work)
 
+    # ---------- сайты клиентов ----------
+    async def save_site(self, project_id: int, version: int, html: str) -> None:
+        """Версия сайта клиента. Та же версия ещё раз — заменяется."""
+        await self._run(lambda conn: conn.execute(
+            "INSERT INTO studio_sites (project_id, version, html, created_at) VALUES (%s, %s, %s, %s) "
+            "ON CONFLICT (project_id, version) DO UPDATE SET html = EXCLUDED.html, created_at = EXCLUDED.created_at",
+            (project_id, version, html, utc_now())))
+
+    async def site_html(self, slug: str, version: int | None = None) -> str | None:
+        """Сайт клиента по адресу: версия или последняя опубликованная. None — нет такого."""
+        def work(conn: Conn) -> str | None:
+            row = conn.execute(
+                "SELECT s.html FROM studio_sites s JOIN projects p ON p.id = s.project_id "
+                "WHERE p.slug = %s AND s.version = COALESCE(%s, p.version)", (slug, version)).fetchone()
+            return row["html"] if row else None
+        return await self._run(work)
+
     # ---------- заявки с сайтов клиентов ----------
     async def add_lead(self, project_id: int, name: str, phone: str, message: str) -> int:
         def work(conn: Conn) -> int:

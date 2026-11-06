@@ -1,0 +1,93 @@
+# Машина админки (codexlab-admin, только частная сеть): PostgreSQL и сайт в
+# роли admin — админка, бот, студия, рассылки, доставка заявок в Telegram.
+# Схему базы меняет только эта машина, поэтому при релизе её выкладывают
+# первой (README рядом).
+#
+#   TAG=<версия> docker compose -f deploy/uzcloud/compose.admin.yml \
+#       --env-file /opt/codexlab/env/compose.env up -d
+#
+# Сеть — машины (network_mode: host): порты открывает и закрывает ufw.
+# Опубликованные порты Docker обошли бы ufw. Снаружи машину не видно, а
+# 5432 и 8080 ufw пускает только с частного адреса машины сайта.
+
+name: codexlab
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "5"
+
+services:
+  db:
+    image: postgres:18
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      POSTGRES_DB: codexlab
+      POSTGRES_USER: codexlab
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?пароль базы}
+    # Машина 2 vCPU / 2 ГБ делит память с сайтом: базе — четверть на буферы,
+    # остальное — кэш ОС. Слушает 127.0.0.1 (сайт на этой машине) и частный
+    # адрес (машина сайта). Запросы дольше секунды — в журнал
+    command:
+      - postgres
+      - -c
+      - listen_addresses=127.0.0.1,${ADMIN_IP:?частный адрес машины админки}
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - effective_cache_size=1GB
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - max_connections=50
+      - -c
+      - random_page_cost=1.1
+      - -c
+      - log_min_duration_statement=1000
+      - -c
+      - timezone=UTC
+      - -c
+      - log_timezone=Asia/Tashkent
+    volumes:
+      # Образ 18 держит данные в /var/lib/postgresql/18/docker
+      - ${CODEXLAB_HOME:-/opt/codexlab}/pg:/var/lib/postgresql
+    shm_size: 128mb
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "codexlab", "-d", "codexlab"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    stop_grace_period: 60s
+    logging: *logging
+
+  admin:
+    image: ${IMAGE:-ghcr.io/xondamirx9/xlab}:${TAG:?версия образа}
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      # Бот, пароль админки, адрес сайта, ключи — README рядом, «Настройки»
+      - ${CODEXLAB_HOME:-/opt/codexlab}/env/app.env
+    # Перекрывают app.env: роль и адреса задаёт машина, а не настройки
+    environment:
+      ROLE: admin
+      HOST: ${ADMIN_IP}
+      PORT: "8080"
+      DATABASE_URL: postgresql://codexlab:${POSTGRES_PASSWORD}@127.0.0.1:5432/codexlab
+      TRUST_PROXY: "1"
+      # Запросы приходят от Caddy машины сайта: ему верим X-Forwarded-For
+      TRUSTED_PROXIES: ${WEB_IP:?частный адрес машины сайта}
+    volumes:
+      - data:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
+    # SIGTERM — сайт дорабатывает начатое и закрывает базу
+    stop_grace_period: 30s
+    logging: *logging
+
+volumes:
+  data:

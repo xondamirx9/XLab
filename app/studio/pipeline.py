@@ -9,11 +9,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import random
 from collections import Counter
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Awaitable, Callable, Iterable
 
 from app.studio import offline as fb
@@ -84,10 +82,10 @@ class Run:
 
 
 class Studio:
-    def __init__(self, store: StudioStore, llm_factory: Callable[[], LLM], sites_dir: Path, *, debate_rounds: int = 2,
+    def __init__(self, store: StudioStore, llm_factory: Callable[[], LLM], *, debate_rounds: int = 2,
                  review_threshold: float = 8.0, max_fix_rounds: int = 2, notify: Notify | None = None,
                  trusted_chats: Iterable[int] = ()) -> None:
-        self.store, self.llm_factory, self.sites_dir = store, llm_factory, sites_dir
+        self.store, self.llm_factory = store, llm_factory
         self.debate_rounds, self.review_threshold, self.max_fix_rounds = debate_rounds, review_threshold, max_fix_rounds
         self.notify = notify
         # Чаты администраторов. Уроки из их проектов (и из веб-панели, chat_id = 0) работают сразу,
@@ -465,14 +463,9 @@ class Studio:
         await self.production(run, ordered)
         return ordered
 
-    def publish(self, project: Project, html: str, version: int) -> Path:
-        folder = self.sites_dir / project.slug
-        folder.mkdir(parents=True, exist_ok=True)
-        (folder / f"v{version}.html").write_text(html, encoding="utf-8")
-        temp = folder / "index.html.tmp"
-        temp.write_text(html, encoding="utf-8")
-        os.replace(temp, folder / "index.html")
-        return folder / "index.html"
+    async def publish(self, project: Project, html: str, version: int) -> None:
+        """Версия сайта клиента — в базу: её отдаёт /sites/<slug>/ на любой из машин."""
+        await self.store.save_site(project.id, version, html)
 
     async def retro(self, run: Run, summary: dict[str, Any]) -> list[str]:
         known = await self.store.all_lessons(30)
@@ -509,7 +502,7 @@ class Studio:
         return saved
 
     async def _finish(self, run: Run, html: str, avg: float, version: int) -> Project:
-        self.publish(run.project, html, version)
+        await self.publish(run.project, html, version)
         usage = getattr(run.llm, "usage", None)
         await self.store.update(run.project.id, status="done", spec=run.spec, version=version, review=round(avg, 2), error="")
         if usage:

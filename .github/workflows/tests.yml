@@ -21,7 +21,7 @@ jobs:
     timeout-minutes: 15
     services:
       postgres:
-        image: postgres:16
+        image: postgres:18                   # та же версия, что на машине админки (deploy/uzcloud)
         env:
           POSTGRES_USER: codexlab
           POSTGRES_PASSWORD: codexlab        # только для этой временной базы проверок
@@ -45,3 +45,19 @@ jobs:
         run: pip install -r requirements.txt
       - name: Проверки
         run: python -m unittest discover -s tests -v
+      # Тот же образ, что уедет на машины (deploy/uzcloud): собирается и отвечает на /api/health
+      - name: Образ Docker
+        run: docker build -t codexlab:ci .
+      - name: Образ запускается
+        run: |
+          docker run -d --name site --network host -e DATABASE_URL="$TEST_DATABASE_URL" \
+            -e HOST=127.0.0.1 -e PORT=8080 -e INDEXNOW=0 codexlab:ci
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/api/health; then
+              docker stop site >/dev/null
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs site
+          exit 1

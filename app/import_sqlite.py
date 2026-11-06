@@ -1,8 +1,8 @@
 """Перенос данных из прежних файлов SQLite в PostgreSQL.
 
 До перехода на PostgreSQL сервер хранил данные в папке DATA_DIR: orders.sqlite3 (заявки), news.sqlite3
-(подписчики и новости), studio.sqlite3 (проекты студии, уроки агентов, заявки с сайтов клиентов).
-Команда переносит их в базу из DATABASE_URL — один раз, одной транзакцией: не получилось — в базе ничего не
+(подписчики и новости), studio.sqlite3 (проекты студии, уроки агентов, заявки с сайтов клиентов), а готовые
+сайты клиентов — файлами в папке sites/<адрес>/v<версия>.html. Команда переносит их в базу из DATABASE_URL — один раз, одной транзакцией: не получилось — в базе ничего не
 меняется. Номера заявок и проектов сохраняются. В базе, где уже есть данные, команда ничего не делает.
 
 Запуск:  python -m app.import_sqlite            — файлы из DATA_DIR
@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from app.config import Config, ConfigError
@@ -76,10 +77,31 @@ def _copy(conn: Conn, folder: Path) -> dict[str, int]:
                 cur.executemany(f'INSERT INTO "{table}" ({", ".join(common)}) VALUES ({marks})',
                                 [tuple(row[i] for i in picks) for row in rows])
             counts[table] = len(rows)
+    sites = _copy_sites(conn, folder)
+    if sites:
+        counts["studio_sites"] = sites
     for table, column in IDENTITY.items():
         conn.execute(f"SELECT setval(pg_get_serial_sequence(%s, %s), COALESCE(MAX({column}), 0) + 1, false) FROM \"{table}\"",
                      (table, column))
     return counts
+
+
+def _copy_sites(conn: Conn, folder: Path) -> int:
+    """Готовые сайты клиентов из sites/<адрес>/v<версия>.html — к своим проектам. Файлы без проекта пропускаются."""
+    root = folder / "sites"
+    if not root.is_dir():
+        return 0
+    projects = {row["slug"]: row["id"] for row in conn.execute("SELECT id, slug FROM projects")}
+    rows = []
+    for page in sorted(root.glob("*/v*.html")):
+        number, project = page.stem[1:], projects.get(page.parent.name)
+        if project is None or not number.isdigit():
+            continue
+        created = datetime.fromtimestamp(page.stat().st_mtime, timezone.utc).isoformat(timespec="seconds")
+        rows.append((project, int(number), page.read_text(encoding="utf-8"), created))
+    with conn.cursor() as cur:
+        cur.executemany("INSERT INTO studio_sites (project_id, version, html, created_at) VALUES (%s, %s, %s, %s)", rows)
+    return len(rows)
 
 
 async def import_folder(db: Database, folder: Path) -> dict[str, int]:
