@@ -436,7 +436,7 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
         return web.json_response({"ok": True})
 
     # Роль (ROLE): web отвечает только посетителям, admin — только админке и служебному API, all — на всё.
-    # На двух машинах Caddy машины сайта пересылает адреса админки на машину админки (deploy/uzcloud/Caddyfile);
+    # На двух машинах Caddy машины сайта пересылает адреса админки на машину админки (deploy/uzcloud/caddy/Caddyfile);
     # здесь чужие адреса даже не заведены — промах в Caddy даст 404, а не админку снаружи.
     public, admin = cfg.role in ("all", "web"), cfg.role in ("all", "admin")
     app = web.Application(middlewares=[headers], client_max_size=MAX_PUBLISH_BYTES + 1024)

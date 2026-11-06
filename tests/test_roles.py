@@ -22,7 +22,7 @@ from app.web import StudioContext, client_ip, create_app
 from pgdb import database_for, test_url
 
 PASSWORD = "очень-длинный-пароль-123"
-CADDYFILE = Path(__file__).resolve().parent.parent / "deploy" / "uzcloud" / "Caddyfile"
+CADDYFILE = Path(__file__).resolve().parent.parent / "deploy" / "uzcloud" / "caddy" / "Caddyfile"
 PAGE = '<!doctype html><html><body><script type="application/json" id="site-data">{}</script><script id="site-js"></script></body></html>'
 # Пути для посетителей и для админки: (метод, путь). Каждый должен быть ровно на одной из машин.
 PUBLIC = [("GET", "/"), ("GET", "/prices"), ("GET", "/robots.txt"), ("GET", "/sitemap.xml"), ("GET", "/api/rate"),
