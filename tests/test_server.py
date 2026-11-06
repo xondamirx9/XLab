@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -25,6 +24,7 @@ from app.bot import Notifier, build_dispatcher, order_header, stats_text
 from app.config import Config, ConfigError
 from app.storage import Storage
 from app.web import RateLimiter, client_ip, create_app, today
+from pgdb import database_for
 
 PASSWORD = "очень-длинный-пароль-123"
 PAGE = '<!doctype html><html><body><script type="application/json" id="site-data">{}</script><script id="site-js"></script></body></html>'
@@ -83,7 +83,7 @@ class ServerCase(unittest.IsolatedAsyncioTestCase):
         (self.root / "site").mkdir()
         (self.root / "site" / "index.html").write_text(PAGE, encoding="utf-8")
         self.cfg = make_config(self.root)
-        self.storage = Storage(self.cfg.data_dir / "orders.sqlite3")
+        self.storage = Storage(await database_for(self))
         await self.storage.init()
         self.woken = 0
         self.client = await self._client(self.cfg)
@@ -244,12 +244,8 @@ class ServerCase(unittest.IsolatedAsyncioTestCase):
     async def test_old_orders_are_purged(self) -> None:
         await self.client.post("/api/order", json=order_body("order-old1"))
         await self.client.post("/api/order", json=order_body("order-new1"))
-        conn = sqlite3.connect(self.cfg.data_dir / "orders.sqlite3")             # первая заявка — давняя
-        try:
-            with conn:
-                conn.execute("UPDATE orders SET created_at = '2020-01-01T00:00:00+00:00' WHERE number = 1")
-        finally:
-            conn.close()
+        db = await database_for(self)                                                # первая заявка — давняя
+        await db.run(lambda conn: conn.execute("UPDATE orders SET created_at = '2020-01-01T00:00:00+00:00' WHERE number = 1"))
         self.assertEqual(await Notifier(make_config(self.root, order_retention_days=0), self.storage, None).purge_expired(), 0)
         self.assertIsNotNone(await self.storage.get(1))                              # срок 0 — ничего не удаляем
         self.assertEqual(await Notifier(self.cfg, self.storage, None).purge_expired(), 1)
@@ -333,9 +329,9 @@ class ServerCase(unittest.IsolatedAsyncioTestCase):
         await self.client.post("/api/order", json=order_body())                      # дубль заявки счётчик не увеличивает
         totals = await self.storage.totals(today())
         self.assertEqual(totals, {"visit": 3, "brief_start": 1, "brief_done": 1, "order": 1})
-        conn = sqlite3.connect(self.cfg.data_dir / "orders.sqlite3")
-        columns = [row[1] for row in conn.execute("PRAGMA table_info(events)")]
-        conn.close()                                                                  # иначе Windows не даст удалить папку теста
+        db = await database_for(self)
+        columns = await db.run(lambda conn: [row["column_name"] for row in conn.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'events' ORDER BY ordinal_position")])
         self.assertEqual(columns, ["day", "name", "count"])                           # в таблице только день, шаг и число
 
     async def test_funnel_event_rate_limit(self) -> None:
@@ -392,7 +388,7 @@ class AdminAccessCase(unittest.IsolatedAsyncioTestCase):
         (self.root / "site").mkdir()
         (self.root / "site" / "index.html").write_text(PAGE, encoding="utf-8")
         self.cfg = make_config(self.root, admin_chat_ids=(self.GROUP,), admin_user_ids=(self.ADMIN,), trust_proxy=True)
-        self.storage = Storage(self.cfg.data_dir / "orders.sqlite3")
+        self.storage = Storage(await database_for(self))
         await self.storage.init()
         self.alerts: list[str] = []
         self.client = TestClient(TestServer(create_app(self.cfg, self.storage, lambda: None, on_admin_action=self.alerts.append)))

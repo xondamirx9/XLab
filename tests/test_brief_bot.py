@@ -13,6 +13,7 @@ from app.brief_bot import DEFAULT_PRICING, TYPES, brief_doc, estimate, money, nu
 from app.news import NewsStore
 from app.rates import Rate
 from app.storage import Storage
+from pgdb import database_for
 from test_news import TelegramCase, command, press, text_message
 from test_server import make_config
 
@@ -135,9 +136,9 @@ class BriefBotCase(TelegramCase):
         (self.root / "site").mkdir()
         (self.root / "site" / "index.html").write_text(site_page(DEFAULT_PRICING), encoding="utf-8")
         self.cfg = make_config(self.root, admin_chat_ids=(111,))
-        self.storage = Storage(self.root / "orders.sqlite3")
+        self.storage = Storage(await database_for(self))
         await self.storage.init()
-        self.news = NewsStore(self.root / "news.sqlite3")
+        self.news = NewsStore(await database_for(self))
         await self.news.init()
         self.woken = 0
         self.dispatcher = build_dispatcher(self.cfg, self.storage, news=self.news, rates=FixedRates(), wake_orders=self.wake)

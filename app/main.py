@@ -1,4 +1,4 @@
-"""Запуск: сайт, заявки, бот, новости и студия из 20 агентов работают в одном процессе."""
+"""Запуск: сайт, заявки, бот, новости и студия из 20 агентов работают в одном процессе; данные — в PostgreSQL."""
 from __future__ import annotations
 
 import asyncio
@@ -11,9 +11,11 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.exceptions import TelegramAPIError
 from aiogram.types import BotCommand
 from aiohttp import web
+from psycopg_pool import PoolTimeout
 
 from app.bot import Notifier, build_dispatcher
 from app.config import Config, ConfigError
+from app.db import Database
 from app.indexnow import IndexNow
 from app.news import Broadcaster, NewsStore
 from app.rates import RateService
@@ -28,11 +30,19 @@ log = logging.getLogger("site")
 
 
 async def run(cfg: Config) -> None:
-    storage = Storage(cfg.data_dir / "orders.sqlite3")
-    await storage.init()
+    db = Database(cfg.database_url)
+    applied = await db.open()                # схема базы — до последней версии
+    if applied:
+        log.info("схема базы обновлена: шаги %s", ", ".join(map(str, applied)))
+    try:
+        await serve(cfg, db)
+    finally:
+        await db.close()
 
-    news = NewsStore(cfg.data_dir / "news.sqlite3")
-    await news.init()
+
+async def serve(cfg: Config, db: Database) -> None:
+    storage = Storage(db)
+    news = NewsStore(db)
     rates = RateService(cfg.data_dir / "rate.json")     # курс доллара NBU для цен в USD на сайте и в боте
 
     bot = Bot(cfg.bot_token, default=DefaultBotProperties(parse_mode=None)) if cfg.bot_token else None
@@ -43,8 +53,7 @@ async def run(cfg: Config) -> None:
     studio_store: StudioStore | None = None
     studio: Studio | None = None
     if cfg.studio_enabled:
-        studio_store = StudioStore(cfg.data_dir / "studio.sqlite3")
-        await studio_store.init()
+        studio_store = StudioStore(db)
         sites_dir = cfg.data_dir / "sites"
         llm = LLMFactory(model=cfg.studio_model, max_calls=cfg.studio_max_calls, enabled=cfg.claude_enabled)
         studio = Studio(studio_store, llm, sites_dir, debate_rounds=cfg.debate_rounds, trusted_chats=cfg.admin_users)
@@ -132,10 +141,16 @@ def main() -> None:
         cfg = Config.from_env()
     except ConfigError as exc:
         sys.exit(f"Ошибка в настройках (.env): {exc}")
+    if not cfg.database_url:
+        sys.exit("Ошибка в настройках (.env): не задан DATABASE_URL — адрес базы PostgreSQL, например "
+                 "postgresql://codexlab:пароль@localhost:5432/codexlab. Как завести базу — README, шаг 2.")
     try:
         asyncio.run(run(cfg))
     except KeyboardInterrupt:
         pass
+    except PoolTimeout:
+        sys.exit("Не удалось подключиться к базе из DATABASE_URL за 30 секунд: проверьте адрес, пользователя и пароль "
+                 "и что PostgreSQL запущен (sudo systemctl status postgresql).")
 
 
 if __name__ == "__main__":
