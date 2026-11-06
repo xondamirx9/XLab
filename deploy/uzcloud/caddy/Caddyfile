@@ -5,6 +5,9 @@
 # SITE_HOSTS     — домены через запятую: на репетиции new.codexlab.uz,
 #                  после переезда codexlab.uz, www.codexlab.uz
 # ADMIN_UPSTREAM — частный адрес и порт машины админки, например 10.0.0.6:8080
+# ROBOTS_HEADER  — на репетиции X-Robots-Tag "noindex, nofollow": поисковики
+#                  не берут второй адрес сайта; после переезда -X-Robots-Tag
+# Все три пишет release.sh (compose.env) — в compose.web.yml они уже стоят.
 #
 # Заголовок X-Forwarded-For от посетителя Caddy не пропускает, а ставит
 # свой — адрес посетителя: по нему сайт и админка считают лимиты.
@@ -13,6 +16,7 @@
 	encode gzip
 	# Браузер год открывает сайт только по HTTPS: подменить первый заход по http:// нельзя
 	header Strict-Transport-Security "max-age=31536000"
+	header {$ROBOTS_HEADER:-X-Robots-Tag}
 
 	# Публикация сайта из админки, совет агентов, проекты студии
 	@admin path /api/publish /council /council/* /api/council/* /api/studio/projects /api/studio/projects/*

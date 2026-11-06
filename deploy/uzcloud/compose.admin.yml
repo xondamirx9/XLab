@@ -3,8 +3,9 @@
 # Схему базы меняет только эта машина, поэтому при релизе её выкладывают
 # первой (README рядом).
 #
-#   TAG=<версия> docker compose -f deploy/uzcloud/compose.admin.yml \
-#       --env-file /opt/codexlab/env/compose.env up -d
+# Выкладывает кнопка релиза (release.sh admin). Посмотреть на машине:
+#   cd /opt/codexlab/deploy && docker compose -p codexlab -f compose.admin.yml \
+#       --env-file ../env/compose.env ps
 #
 # Сеть — машины (network_mode: host): порты открывает и закрывает ufw.
 # Опубликованные порты Docker обошли бы ufw. Снаружи машину не видно, а
@@ -65,7 +66,7 @@ services:
     logging: *logging
 
   admin:
-    image: ${IMAGE:-ghcr.io/xondamirx9/xlab}:${TAG:?версия образа}
+    image: ${IMAGE:-codexlab}:${TAG:?версия образа}
     restart: unless-stopped
     network_mode: host
     env_file:

@@ -500,6 +500,16 @@ venv/bin/python -m unittest discover -s tests -v
 Telegram в проверках подменён локальной заглушкой: настоящие сообщения никому не уходят.
 Claude тоже подменён: проверки не тратят деньги и проходят без ключа.
 
+Скрипты выкладки и workflow GitHub проверяются так же, как в CI:
+
+```bash
+shellcheck deploy/uzcloud/*.sh
+actionlint                       # .github/workflows; настройки — .github/actionlint.yaml
+```
+
+Изменения выкладки (`deploy/uzcloud/`, `release.yml`) проверяются ещё и на стенде из контейнеров — машинах
+Ubuntu с SSH и Docker внутри, как в `deploy/uzcloud/README.md`.
+
 ## Ограничения первой версии
 
 - Сервер рассчитан на один процесс. Сайты собираются по очереди (`STUDIO_CONCURRENCY`, по умолчанию 1).

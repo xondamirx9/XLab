@@ -1,0 +1,449 @@
+# Релиз Codex Lab на две машины UzCloud (Ташкент): машина сайта и машина
+# админки с базой (deploy/uzcloud/README.md).
+#
+# Только по кнопке: Actions → release → Run workflow, ветка — та, что
+# выкладывается (до переезда — uzcloud, после — main). Выкладывается
+# последний коммит ветки, и только если на нём прошли автотесты (tests).
+#
+# Что делает:
+# - «подготовить машины» — deploy/uzcloud/bootstrap.sh на обеих машинах
+#   (Docker, файрвол, SSH по ключу, пользователь deploy);
+# - образ Docker собирается здесь и загружается на обе машины по SSH;
+# - настройки сайта (бот, пароль админки, адрес) — из секретов и
+#   переменных GitHub в /opt/codexlab/env/app.env, ключи хранилища копий — в
+#   backup.env на машине админки. В журнал значения не выводятся;
+# - копия базы в хранилище перед релизом (backup.sh db release). Не
+#   снялась — релиз останавливается до любых изменений;
+# - машина админки: база, схема, админка, копии в расписании; затем
+#   машина сайта (release.sh: не поднялась — возвращается прежняя версия);
+# - проверка снаружи, как посетитель; запись релиза в Environments → production;
+# - «проверить восстановление» — поднять последнюю ночную копию базы во
+#   временной базе и сверить с боевой (backup.sh check).
+#
+# В GitHub Actions машины видны так: машина сайта — по публичному адресу
+# сети (порты 22, 80 и 443), машина админки — через неё (ProxyJump) по
+# частному адресу.
+#
+# Секреты и переменные (Settings → Secrets and variables → Actions) — в
+# deploy/uzcloud/README.md, «Первый запуск». Репозиторий публичный, журналы
+# Actions видят все: пароли, ключи и значения настроек в журнал не выводятся.
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bootstrap:
+        description: 'Сначала подготовить машины (новые машины или новый адрес машины сайта)'
+        type: boolean
+        default: false
+      no_backup:
+        description: 'Без копии базы перед релизом (только если копия не снимается)'
+        type: boolean
+        default: false
+      restore_check:
+        description: 'После релиза — проверить восстановление из ночной копии базы'
+        type: boolean
+        default: false
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    if: vars.PROD_HOST != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+      # Запись удачного релиза — Environments → production
+      deployments: write
+    env:
+      HOST: ${{ vars.PROD_HOST }}
+      WEB_IP: ${{ vars.PROD_WEB_IP }}
+      ADMIN_IP: ${{ vars.PROD_ADMIN_IP }}
+      SITE_DOMAIN: ${{ vars.PROD_DOMAIN || 'new.codexlab.uz' }}
+      KNOWN_HOSTS: ${{ vars.PROD_KNOWN_HOSTS }}
+      BOOTSTRAP_USER: ${{ vars.PROD_BOOTSTRAP_USER || 'root' }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Вся история ветки: что вошло с прошлого релиза
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Что выкладывается
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          for name in WEB_IP ADMIN_IP; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Нет переменной PROD_$name — частного адреса машины (deploy/uzcloud/README.md)"
+              exit 1
+            fi
+          done
+          # Только коммит, на котором прошли автотесты (tests.yml, push)
+          passed=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/tests.yml/runs?head_sha=$sha&status=success&per_page=1" \
+            --jq '.total_count')
+          if [ "$passed" = 0 ]; then
+            echo "::error::На коммите ${sha:0:12} автотесты (tests) не прошли или ещё идут — релиз остановлен."
+            exit 1
+          fi
+
+          # Прошлый релиз — последняя удачная запись в окружении production
+          prev=""
+          while read -r id commit; do
+            state=$(gh api "repos/$GITHUB_REPOSITORY/deployments/$id/statuses?per_page=1" --jq '.[0].state // ""')
+            if [ "$state" = success ]; then
+              prev=$commit
+              break
+            fi
+          done < <(gh api "repos/$GITHUB_REPOSITORY/deployments?environment=production&per_page=30" --jq '.[] | "\(.id) \(.sha)"')
+
+          {
+            echo "## Релиз ${sha:0:12} на https://$SITE_DOMAIN"
+            echo
+            echo "Ветка \`$GITHUB_REF_NAME\`: $(git log -1 --format=%s "$sha")"
+            echo
+            if [ -n "$prev" ] && git cat-file -e "$prev^{commit}" 2>/dev/null; then
+              count=$(git rev-list --count --first-parent "$prev..$sha")
+              if [ "$count" = 0 ]; then
+                echo "С прошлого релиза (${prev:0:12}) нового нет — выкладка той же версии."
+              else
+                echo "С прошлого релиза (${prev:0:12}):"
+                echo
+                git log --first-parent --format='%H' "$prev..$sha" | while read -r commit; do
+                  subject=$(git log -1 --format=%s "$commit")
+                  title=$(git log -1 --format=%b "$commit" | sed -n '1{/./p}')
+                  if [[ "$subject" =~ ^Merge\ pull\ request\ (#[0-9]+) ]]; then
+                    echo "- ${BASH_REMATCH[1]} ${title:-$subject}"
+                  else
+                    echo "- $subject"
+                  fi
+                done
+              fi
+            else
+              echo "Первый релиз."
+            fi
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$DEPLOY_SSH_KEY" ]; then
+            echo "::error::Нет секрета DEPLOY_SSH_KEY (deploy/uzcloud/README.md)"
+            exit 1
+          fi
+          install -d -m 700 ~/.ssh
+          # Ключ из Блокнота приходит с переносами Windows или одной строкой — собираем заново
+          key=$(printf '%s' "$DEPLOY_SSH_KEY" | tr -d '\r')
+          header=$(printf '%s' "$key" | grep -o -- '-----BEGIN [A-Z ]*-----' | head -1 || true)
+          if [ -z "$header" ]; then
+            echo "::error::В секрете DEPLOY_SSH_KEY не закрытый ключ."
+            exit 1
+          fi
+          body=$(printf '%s' "$key" | sed -e 's/-----BEGIN [A-Z ]*-----//' -e 's/-----END [A-Z ]*-----//' | tr -d ' \t\n')
+          umask 077
+          { echo "$header"; printf '%s' "$body" | fold -w 70; echo; echo "${header/BEGIN/END}"; } > ~/.ssh/id_deploy
+          ssh-keygen -y -f ~/.ssh/id_deploy > /dev/null
+
+          cat > ~/.ssh/config <<CONF
+          Host web
+            HostName $HOST
+            User deploy
+          Host admin
+            HostName $ADMIN_IP
+            User deploy
+            ProxyJump web
+          Host *
+            IdentityFile ~/.ssh/id_deploy
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+            UpdateHostKeys no
+            ServerAliveInterval 30
+            ConnectTimeout 20
+          CONF
+
+          # Ключи машин: из переменной PROD_KNOWN_HOSTS, иначе — с самих машин
+          # (машина админки — через машину сайта) и подсказка, что сохранить
+          if [ -n "$KNOWN_HOSTS" ]; then
+            printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -t ed25519 "$HOST" 2>/dev/null > ~/.ssh/known_hosts
+            if [ ! -s ~/.ssh/known_hosts ]; then
+              echo "::error::Машина сайта ($HOST) не отвечает по SSH — проверьте адрес PROD_HOST и порт 22."
+              exit 1
+            fi
+            # До подготовки машин пользователя deploy ещё нет — через пользователя образа
+            found=$(ssh -o User="$BOOTSTRAP_USER" "$HOST" "ssh-keyscan -t ed25519 $ADMIN_IP 2>/dev/null" \
+              || ssh web "ssh-keyscan -t ed25519 $ADMIN_IP 2>/dev/null" || true)
+            if [ -z "$found" ]; then
+              echo "::error::Машина админки ($ADMIN_IP) не отвечает по SSH из частной сети — она запущена и в той же сети?"
+              exit 1
+            fi
+            printf '%s\n' "$found" >> ~/.ssh/known_hosts
+            {
+              echo
+              echo "Ключи машин не закреплены. Сохраните переменную PROD_KNOWN_HOSTS (две строки):"
+              echo
+              echo '```'
+              cat ~/.ssh/known_hosts
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::Ключи машин не закреплены — значение для переменной PROD_KNOWN_HOSTS в сводке запуска (Summary)."
+          fi
+
+      - name: Подготовить машины
+        if: inputs.bootstrap
+        run: |
+          set -euo pipefail
+          sudo=""
+          if [ "$BOOTSTRAP_USER" != root ]; then
+            sudo="sudo"
+          fi
+          for role in web admin; do
+            case "$role" in
+              web) target=(-o User="$BOOTSTRAP_USER" "$HOST") ;;
+              admin) target=(-o User="$BOOTSTRAP_USER" -o ProxyJump="$BOOTSTRAP_USER@$HOST" "$ADMIN_IP") ;;
+            esac
+            echo "── Машина $role"
+            ssh "${target[@]}" 'cat > /tmp/codexlab-bootstrap.sh' < deploy/uzcloud/bootstrap.sh
+            ssh "${target[@]}" "$sudo env CODEXLAB_ROLE=$role WEB_IP=$WEB_IP bash /tmp/codexlab-bootstrap.sh && rm -f /tmp/codexlab-bootstrap.sh"
+          done
+
+      - name: Образ
+        run: |
+          set -euo pipefail
+          tag=$(git rev-parse HEAD | cut -c1-12)
+          echo "TAG=$tag" >> "$GITHUB_ENV"
+          docker build -q -t "codexlab:$tag" . > /dev/null
+          # Тот же образ — на обе машины; уже есть — не везём
+          for host in admin web; do
+            if ssh "$host" "docker image inspect codexlab:$tag" > /dev/null 2>&1; then
+              echo "$host: codexlab:$tag уже есть"
+              continue
+            fi
+            start=$(date +%s)
+            docker save "codexlab:$tag" | gzip -1 | ssh "$host" 'gunzip | docker load' > /dev/null
+            echo "$host: codexlab:$tag загружен за $(( $(date +%s) - start )) с"
+          done
+
+      - name: Файлы выкладки
+        run: |
+          set -euo pipefail
+          for host in admin web; do
+            tar -C deploy/uzcloud -czf - . | ssh "$host" 'mkdir -p /opt/codexlab/deploy && tar -xzf - -C /opt/codexlab/deploy'
+          done
+
+      - name: Настройки
+        env:
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ADMIN_CHAT_IDS: ${{ vars.ADMIN_CHAT_IDS }}
+          ADMIN_USER_IDS: ${{ vars.ADMIN_USER_IDS }}
+          ORDER_RETENTION_DAYS: ${{ vars.ORDER_RETENTION_DAYS }}
+          STUDIO_ENABLED: ${{ vars.STUDIO_ENABLED }}
+          STUDIO_MODEL: ${{ vars.STUDIO_MODEL }}
+          STUDIO_MAX_CALLS: ${{ vars.STUDIO_MAX_CALLS }}
+          STUDIO_DAILY_LIMIT: ${{ vars.STUDIO_DAILY_LIMIT }}
+          STUDIO_CONCURRENCY: ${{ vars.STUDIO_CONCURRENCY }}
+          STUDIO_DEBATE_ROUNDS: ${{ vars.STUDIO_DEBATE_ROUNDS }}
+          GOOGLE_SITE_VERIFICATION: ${{ vars.GOOGLE_SITE_VERIFICATION }}
+          YANDEX_VERIFICATION: ${{ vars.YANDEX_VERIFICATION }}
+          BING_SITE_VERIFICATION: ${{ vars.BING_SITE_VERIFICATION }}
+          S3_ENDPOINT: ${{ vars.S3_ENDPOINT }}
+          S3_BUCKET: ${{ vars.S3_BUCKET || 'codexlab' }}
+          S3_ACCESS_KEY: ${{ secrets.S3_ACCESS_KEY }}
+          S3_SECRET_KEY: ${{ secrets.S3_SECRET_KEY }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          # Строка KEY=значение; пустое — не пишем (у сайта своё значение по
+          # умолчанию). Перевод строки в значении сломал бы файл — отказ
+          put() {
+            if [ -z "$2" ]; then return 0; fi
+            case "$2" in *$'\n'*|*$'\r'*)
+              echo "::error::В значении $1 перевод строки — исправьте секрет или переменную." >&2
+              return 1 ;;
+            esac
+            printf '%s=%s\n' "$1" "$2"
+          }
+          # Поисковикам о новых страницах — только с боевого адреса
+          indexnow=0
+          if [ "$SITE_DOMAIN" = codexlab.uz ]; then
+            indexnow=1
+          fi
+          common() {
+            echo "# Пишет кнопка релиза из секретов и переменных GitHub — правки здесь пропадут при следующем релизе"
+            put PUBLIC_URL "https://$SITE_DOMAIN"
+            put ORDER_RETENTION_DAYS "$ORDER_RETENTION_DAYS"
+            put STUDIO_ENABLED "$STUDIO_ENABLED"
+            put STUDIO_DAILY_LIMIT "$STUDIO_DAILY_LIMIT"
+            put GOOGLE_SITE_VERIFICATION "$GOOGLE_SITE_VERIFICATION"
+            put YANDEX_VERIFICATION "$YANDEX_VERIFICATION"
+            put BING_SITE_VERIFICATION "$BING_SITE_VERIFICATION"
+          }
+          # Машине сайта — ни бота, ни пароля админки, ни ключей: они ей не нужны
+          { common; put INDEXNOW 0; } | ssh web 'umask 077; mkdir -p /opt/codexlab/env; cat > /opt/codexlab/env/app.env'
+          {
+            common
+            put INDEXNOW "$indexnow"
+            put ADMIN_PASSWORD "$ADMIN_PASSWORD"
+            put BOT_TOKEN "$BOT_TOKEN"
+            put ADMIN_CHAT_IDS "$ADMIN_CHAT_IDS"
+            put ADMIN_USER_IDS "$ADMIN_USER_IDS"
+            put ANTHROPIC_API_KEY "$ANTHROPIC_API_KEY"
+            put STUDIO_MODEL "$STUDIO_MODEL"
+            put STUDIO_MAX_CALLS "$STUDIO_MAX_CALLS"
+            put STUDIO_CONCURRENCY "$STUDIO_CONCURRENCY"
+            put STUDIO_DEBATE_ROUNDS "$STUDIO_DEBATE_ROUNDS"
+          } | ssh admin 'umask 077; mkdir -p /opt/codexlab/env; cat > /opt/codexlab/env/app.env'
+          if [ -z "$ADMIN_PASSWORD" ]; then
+            echo "::warning::Нет секрета ADMIN_PASSWORD — публикация из админки и совет агентов выключены."
+          fi
+          if [ -z "$BOT_TOKEN" ]; then
+            echo "::warning::Нет секрета BOT_TOKEN — заявки сохраняются в базе, но в Telegram не приходят."
+          fi
+
+          # Ключи хранилища и пароль шифрования копий — на машину админки через stdin
+          if [ -n "$S3_ENDPOINT" ] && [ -n "$S3_ACCESS_KEY" ] && [ -n "$S3_SECRET_KEY" ] && [ -n "$BACKUP_PASSPHRASE" ]; then
+            {
+              printf 'S3_ENDPOINT=%q\n' "$S3_ENDPOINT"
+              printf 'S3_BUCKET=%q\n' "$S3_BUCKET"
+              printf 'S3_ACCESS_KEY=%q\n' "$S3_ACCESS_KEY"
+              printf 'S3_SECRET_KEY=%q\n' "$S3_SECRET_KEY"
+              printf 'BACKUP_PASSPHRASE=%q\n' "$BACKUP_PASSPHRASE"
+            } | ssh admin 'umask 077; cat > /opt/codexlab/env/backup.env'
+          else
+            ssh admin 'rm -f /opt/codexlab/env/backup.env'
+            echo "::warning::Нет ключей хранилища (S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY) или BACKUP_PASSPHRASE — копии базы не снимаются."
+          fi
+
+      - name: Копия базы перед релизом
+        if: ${{ !inputs.no_backup }}
+        run: |
+          set -euo pipefail
+          # Дальше машина админки меняет схему базы: до неё — свежая копия в
+          # хранилище, отдельным файлом с меткой release
+          # Каталог базы пуст — база ещё ни разу не запускалась, копировать нечего
+          if ! ssh admin '[ -n "$(ls -A /opt/codexlab/pg 2>/dev/null)" ]'; then
+            echo "::notice title=Копия базы::Базы ещё нет (первый релиз) — копировать нечего"
+            exit 0
+          fi
+          if ! ssh admin 'test -s /opt/codexlab/env/backup.env'; then
+            echo "::error title=Копия базы::Нет ключей хранилища — копия перед релизом не снимется. Добавьте секреты (README) или выложите с галочкой «без копии базы»."
+            exit 1
+          fi
+          if ! ssh admin 'bash /opt/codexlab/deploy/backup.sh db release'; then
+            echo "::error title=Копия базы::Копия перед релизом не снялась — релиз остановлен, сайт и база не тронуты. Выложить без копии — галочка «без копии базы»."
+            exit 1
+          fi
+
+      - name: Админка и схема базы
+        run: |
+          ssh admin "WEB_IP='$WEB_IP' ADMIN_IP='$ADMIN_IP' SITE_DOMAIN='$SITE_DOMAIN' \
+            bash /opt/codexlab/deploy/release.sh admin '$TAG'"
+
+      - name: Сайт
+        run: |
+          set -euo pipefail
+          # Пароль базы — только с машины админки на машину сайта, мимо журнала
+          ssh admin 'cat /opt/codexlab/env/db.env' | ssh web 'umask 077; cat > /opt/codexlab/env/db.env'
+          ssh web "WEB_IP='$WEB_IP' ADMIN_IP='$ADMIN_IP' SITE_DOMAIN='$SITE_DOMAIN' \
+            bash /opt/codexlab/deploy/release.sh web '$TAG'"
+
+      - name: Проверка снаружи
+        run: |
+          set -euo pipefail
+          # Как посетитель: из интернета, по HTTPS. Сертификат Caddy выпускает
+          # при первом обращении, а в день переезда — когда DNS начнёт
+          # указывать сюда: ждём до пяти минут
+          url="https://$SITE_DOMAIN"
+          for _ in $(seq 1 60); do
+            if curl -fsS -o /dev/null "$url/api/health" 2>/dev/null; then break; fi
+            sleep 5
+          done
+          health=$(curl -fsS "$url/api/health") || { echo "::error::$url/api/health не отвечает — DNS указывает на $HOST?"; exit 1; }
+          role=$(jq -r .role <<< "$health")
+          if [ "$role" != web ]; then
+            echo "::error::$url/api/health: роль «$role», а должна быть web"
+            exit 1
+          fi
+          echo "$url/api/health — сайт: $(jq -r .site <<< "$health"), бот: $(jq -r .bot <<< "$health")"
+          for path in / /prices /robots.txt /sitemap.xml; do
+            status=$(curl -s -o /dev/null -w '%{http_code}' "$url$path")
+            echo "$url$path — $status"
+            if [ "$status" != 200 ]; then
+              echo "::error::$url$path отвечает $status"
+              exit 1
+            fi
+          done
+          # Курс доллара берётся у NBU и ЦБ: их сбой — не повод останавливать релиз
+          status=$(curl -s -o /dev/null -w '%{http_code}' "$url/api/rate")
+          echo "$url/api/rate — $status"
+          if [ "$status" != 200 ]; then
+            echo "::warning title=Курс доллара::$url/api/rate отвечает $status — курс от NBU и ЦБ пока не получен, цены в USD не показываются"
+          fi
+          # Адрес админки — с машины админки. GET на публикацию: там такого
+          # метода нет (405), а машина сайта не знает адреса вовсе (404).
+          # Без пароля — неверный пароль считался бы попыткой подбора
+          status=$(curl -s -o /dev/null -w '%{http_code}' "$url/api/publish")
+          echo "$url/api/publish (GET) — $status"
+          if [ "$status" != 405 ]; then
+            echo "::error::Адрес админки отвечает $status, а не 405: Caddy не передаёт его на машину админки?"
+            exit 1
+          fi
+          robots=$(curl -sI "$url/" | tr -d '\r' | grep -i '^x-robots-tag:' || true)
+          if [ "$SITE_DOMAIN" != codexlab.uz ] && [ -z "$robots" ]; then
+            echo "::error::Репетиция $SITE_DOMAIN без X-Robots-Tag: поисковики возьмут второй адрес сайта"
+            exit 1
+          fi
+          if [ "$SITE_DOMAIN" = codexlab.uz ] && [ -n "$robots" ]; then
+            echo "::error::Боевой адрес отдаёт $robots — поисковики его не возьмут"
+            exit 1
+          fi
+          admin=$(ssh web "curl -fsS http://$ADMIN_IP:8080/api/health")
+          echo "Машина админки: роль $(jq -r .role <<< "$admin"), бот: $(jq -r .bot <<< "$admin"), студия: $(jq -r .studio <<< "$admin")"
+
+      - name: Релиз записан
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          id=$(jq -n --arg ref "$sha" '{ref: $ref, environment: "production", auto_merge: false,
+                 required_contexts: [], production_environment: true,
+                 description: "Релиз на машинах UzCloud"}' \
+               | gh api "repos/$GITHUB_REPOSITORY/deployments" --input - --jq .id)
+          gh api "repos/$GITHUB_REPOSITORY/deployments/$id/statuses" \
+            -f state=success -f environment_url="https://$SITE_DOMAIN" \
+            -f log_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > /dev/null
+          echo "Готово: https://$SITE_DOMAIN — \`${sha:0:12}\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Проверка восстановления
+        # Релиз уже выложен и записан: сбой здесь — предупреждение, а не
+        # упавший релиз. Вывод — без данных из базы
+        if: inputs.restore_check
+        run: |
+          set -uo pipefail
+          if out=$(ssh admin 'bash /opt/codexlab/deploy/backup.sh check' 2>&1); then
+            echo "$out"
+            result=$(printf '%s\n' "$out" | grep -m 1 'Проверка восстановления:' | sed 's/^.*Проверка восстановления: //')
+            echo "::notice title=Восстановление из копии::$result"
+            echo "Восстановление из копии: $result" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "$out"
+            reason=$(printf '%s\n' "$out" | grep -m 1 'ОШИБКА' | sed 's/^.*ОШИБКА[^:]*: //')
+            echo "::warning title=Восстановление из копии::${reason:-проверка не прошла — журнал выше}"
+          fi
+          exit 0

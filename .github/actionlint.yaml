@@ -1,0 +1,7 @@
+# Проверка workflow: actionlint (README, «Проверки для разработчика»).
+paths:
+  .github/workflows/release.yml:
+    ignore:
+      # Нарочно: адреса машин и версия подставляются на раннере в команду
+      # для машины (ssh admin "… release.sh admin '$TAG'")
+      - 'SC2029'

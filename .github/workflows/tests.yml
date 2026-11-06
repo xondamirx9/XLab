@@ -45,6 +45,11 @@ jobs:
         run: pip install -r requirements.txt
       - name: Проверки
         run: python -m unittest discover -s tests -v
+      # Скрипты выкладки и workflow — до кнопки релиза, а не на машинах
+      - name: Скрипты выкладки
+        run: shellcheck deploy/uzcloud/*.sh
+      - name: Workflow
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7 -color
       # Тот же образ, что уедет на машины (deploy/uzcloud): собирается и отвечает на /api/health
       - name: Образ Docker
         run: docker build -t codexlab:ci .
