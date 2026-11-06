@@ -1,11 +1,13 @@
 """Тексты и цены сайта в базе, вёрстка из git: сведение правок, релиз, публикация с прежним кодом, откат."""
 from __future__ import annotations
 
+import asyncio
 import tempfile
 import unittest
 from pathlib import Path
 from urllib.parse import quote
 
+import psycopg
 from aiohttp.test_utils import TestClient, TestServer
 
 from app.brief_bot import SitePricing
@@ -145,6 +147,51 @@ class LiveCase(unittest.IsolatedAsyncioTestCase):
         web.invalidate()
         self.assertEqual((await web.page()).data["texts"]["heroTitle"], "Новое")
 
+    async def test_database_outage_keeps_last_page(self) -> None:
+        down = False
+        real_latest = self.store.latest_id
+
+        async def latest_id() -> int:
+            if down:
+                raise psycopg.OperationalError("connection refused")
+            return await real_latest()
+        self.store.latest_id = latest_id                                       # type: ignore[method-assign]
+        await self.site.publish(page(edited(GIT, texts__heroTitle="Из админки")))
+        self.assertEqual((await self.site.page()).data["texts"]["heroTitle"], "Из админки")
+
+        down = True                                                            # машину с базой перезагружают
+        with self.assertLogs("site.content", "WARNING"):
+            live = await self.site.page()                                      # базу спрашивает фон, посетитель не ждёт
+            await self.site.checked()
+        self.assertEqual(live.data["texts"]["heroTitle"], "Из админки")       # посетитель видит последнее прочитанное
+        self.assertEqual((await self.site.page()).data["texts"]["heroTitle"], "Из админки")
+        self.release(edited(GIT, texts__badge="Новое"))                        # и релиз в это время тоже доходит
+        live = await self.site.page()
+        self.assertEqual((live.source, live.data["texts"]["heroTitle"], live.data["texts"]["badge"]),
+                         ("merged", "Из админки", "Новое"))
+
+        down = False
+        await self.store.add(data=edited(GIT, texts__heroTitle="После"), base=GIT, html=None, template_sha="")
+        with self.assertLogs("site.content", "INFO"):
+            await self.site.page()
+            await self.site.checked()
+        self.assertEqual((await self.site.page()).data["texts"]["heroTitle"], "После")
+
+    async def test_visitor_never_waits_for_database_check(self) -> None:
+        await self.site.page()
+        slow = asyncio.Event()
+        real_latest = self.store.latest_id
+
+        async def latest_id() -> int:
+            await slow.wait()                                                  # база «висит»
+            return await real_latest()
+        self.store.latest_id = latest_id                                       # type: ignore[method-assign]
+        live = await asyncio.wait_for(self.site.page(), 1)                    # ответ — сразу, из прочитанного
+        self.assertEqual(live.source, "git")
+        await asyncio.wait_for(self.site.page(), 1)                           # вторая проверка не начинается, пока идёт первая
+        slow.set()
+        await self.site.checked()
+
     async def test_bot_prices_follow_publication(self) -> None:
         pricing = SitePricing(self.site)
         self.assertEqual((await pricing.fresh())["types"]["landing"]["price"], [3.0, 9.0])
@@ -168,6 +215,7 @@ class LiveCase(unittest.IsolatedAsyncioTestCase):
     async def test_reset_returns_git_texts(self) -> None:
         await self.site.publish(page(edited(GIT, texts__heroTitle="Правка")))
         await reset(self.store, self.file.read_text(encoding="utf-8"))
+        self.site.invalidate()
         self.release(edited(GIT, texts__heroTitle="Из git"))                  # и дальше всё берётся из git
         self.assertEqual((await self.site.page()).data["texts"]["heroTitle"], "Из git")
 

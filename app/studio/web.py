@@ -64,13 +64,15 @@ def project_payload(p: Project, public: bool = False) -> dict[str, Any]:
     return data
 
 
-def setup_studio(app: web.Application, *, store: StudioStore, studio: Studio, news: NewsStore | None, sites_dir: Path,
+def setup_studio(app: web.Application, *, store: StudioStore, studio: Studio, news: NewsStore | None,
                  check_admin: Callable[[web.Request], Awaitable[web.Response | None]], client_ip: Callable[[web.Request], str],
                  limiter: Callable[[int, float], Any], wake_worker: Callable[[], None], wake_news: Callable[[], None],
-                 on_admin_action: Callable[[str], None] = lambda text: None) -> None:
+                 on_admin_action: Callable[[str], None] = lambda text: None, public: bool = True, admin: bool = True) -> None:
+    """Адреса студии. public — для посетителей (сайты клиентов, заявки с них, страница проекта по ссылке, новости),
+    admin — совет агентов и служебное API по паролю. На двух машинах первые — на машине сайта, вторые — админки."""
     lead_limit = limiter(5, 600)              # 5 заявок за 10 минут с одного адреса на сайты клиентов
 
-    def admin(handler: Callable[[web.Request], Awaitable[web.StreamResponse]]):
+    def admin_only(handler: Callable[[web.Request], Awaitable[web.StreamResponse]]):
         async def wrapped(request: web.Request) -> web.StreamResponse:
             denied = await check_admin(request)
             return denied if denied is not None else await handler(request)
@@ -82,11 +84,11 @@ def setup_studio(app: web.Application, *, store: StudioStore, studio: Studio, ne
         version = request.match_info.get("version")
         if not SLUG.match(slug):
             raise web.HTTPNotFound()
-        file = sites_dir / slug / (f"v{int(version)}.html" if version else "index.html")
-        if not file.is_file():
+        html = await store.site_html(slug, int(version) if version else None)
+        if html is None:
             raise web.HTTPNotFound()
-        return web.FileResponse(file, headers={"Cache-Control": "no-cache", "Content-Security-Policy": site_csp(),
-                                               "Content-Type": "text/html; charset=utf-8"})
+        return web.Response(text=html, content_type="text/html", charset="utf-8",
+                            headers={"Cache-Control": "no-cache", "Content-Security-Policy": site_csp()})
 
     async def site_redirect(request: web.Request) -> web.StreamResponse:
         slug = request.match_info["slug"]
@@ -130,7 +132,7 @@ def setup_studio(app: web.Application, *, store: StudioStore, studio: Studio, ne
             raise web.HTTPNotFound()
         return await council_page(request)
 
-    @admin
+    @admin_only
     async def council_state(request: web.Request) -> web.Response:
         projects = await store.list_projects(50)
         return web.json_response({
@@ -138,7 +140,7 @@ def setup_studio(app: web.Application, *, store: StudioStore, studio: Studio, ne
             "lessons": (await store.all_lessons(100)), "tasks": (await store.tasks(None, 60)),
         }, headers={"Cache-Control": "no-store"})
 
-    @admin
+    @admin_only
     async def council_feed(request: web.Request) -> web.Response:
         try:
             after = int(request.query.get("after", "0"))
@@ -174,7 +176,7 @@ def setup_studio(app: web.Application, *, store: StudioStore, studio: Studio, ne
             return None
         return data if isinstance(data, dict) else None
 
-    @admin
+    @admin_only
     async def create_project(request: web.Request) -> web.Response:
         data = await read_json(request)
         if data is None or not _clean(data.get("business"), 60):
@@ -190,7 +192,7 @@ def setup_studio(app: web.Application, *, store: StudioStore, studio: Studio, ne
         except ValueError:
             return None
 
-    @admin
+    @admin_only
     async def revise_project(request: web.Request) -> web.Response:
         project = await _project_from(request)
         data = await read_json(request)
@@ -203,7 +205,7 @@ def setup_studio(app: web.Application, *, store: StudioStore, studio: Studio, ne
         wake_worker()
         return web.json_response({"ok": True})
 
-    @admin
+    @admin_only
     async def rate_project(request: web.Request) -> web.Response:
         project = await _project_from(request)
         data = await read_json(request) or {}
@@ -216,7 +218,7 @@ def setup_studio(app: web.Application, *, store: StudioStore, studio: Studio, ne
         return web.json_response({"ok": True, "lessons_changed": len(changed)})
 
     # ---------- новости ----------
-    @admin
+    @admin_only
     async def post_news(request: web.Request) -> web.Response:
         if news is None:
             return _error(503, "Новости выключены.")
@@ -240,20 +242,22 @@ def setup_studio(app: web.Application, *, store: StudioStore, studio: Studio, ne
         return web.json_response({"ok": True, "news": items})
 
     r = app.router
-    r.add_get("/sites/{slug}", site_redirect)
-    r.add_get("/sites/{slug}/", site)
-    r.add_get(r"/sites/{slug}/v{version:\d{1,4}}", site)
-    r.add_post("/api/sites/{slug}/lead", lead)
-    r.add_get("/council", council_page)
-    r.add_get("/studio/p/{token}", project_page)
-    r.add_get("/api/council/state", council_state)
-    r.add_get("/api/council/feed", council_feed)
-    r.add_get("/api/studio/p/{token}/feed", public_feed)
-    r.add_post("/api/studio/projects", create_project)
-    r.add_post(r"/api/studio/projects/{id:\d+}/revise", revise_project)
-    r.add_post(r"/api/studio/projects/{id:\d+}/rate", rate_project)
-    r.add_get("/api/news", list_news)
-    r.add_post("/api/news", post_news)
+    if public:
+        r.add_get("/sites/{slug}", site_redirect)
+        r.add_get("/sites/{slug}/", site)
+        r.add_get(r"/sites/{slug}/v{version:\d{1,4}}", site)
+        r.add_post("/api/sites/{slug}/lead", lead)
+        r.add_get("/studio/p/{token}", project_page)
+        r.add_get("/api/studio/p/{token}/feed", public_feed)
+        r.add_get("/api/news", list_news)
+    if admin:
+        r.add_get("/council", council_page)
+        r.add_get("/api/council/state", council_state)
+        r.add_get("/api/council/feed", council_feed)
+        r.add_post("/api/studio/projects", create_project)
+        r.add_post(r"/api/studio/projects/{id:\d+}/revise", revise_project)
+        r.add_post(r"/api/studio/projects/{id:\d+}/rate", rate_project)
+        r.add_post("/api/news", post_news)
 
 
 def brief_from(data: dict[str, Any]) -> dict[str, Any]:

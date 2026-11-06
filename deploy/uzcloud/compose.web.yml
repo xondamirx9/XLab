@@ -1,0 +1,56 @@
+# Машина сайта (codexlab-web, единственный внешний адрес): Caddy (HTTPS) и
+# сайт в роли web — страницы, заявки, сайты клиентов. Схему базы не меняет:
+# при старте ждёт, пока её обновит машина админки (до 2 минут).
+#
+#   TAG=<версия> docker compose -f deploy/uzcloud/compose.web.yml \
+#       --env-file /opt/codexlab/env/compose.env up -d
+#
+# Сеть — машины (network_mode: host): снаружи открыты только 80 и 443 (ufw),
+# сайт слушает 127.0.0.1:8080 и видит Caddy как 127.0.0.1.
+
+name: codexlab
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "5"
+
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      SITE_HOSTS: ${SITE_HOSTS:?домены сайта через запятую}
+      ADMIN_UPSTREAM: ${ADMIN_IP:?частный адрес машины админки}:8080
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Сертификаты: без тома Caddy выпускал бы их при каждом перезапуске
+      - caddy_data:/data
+      - caddy_config:/config
+    logging: *logging
+
+  web:
+    image: ${IMAGE:-ghcr.io/xondamirx9/xlab}:${TAG:?версия образа}
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - ${CODEXLAB_HOME:-/opt/codexlab}/env/app.env
+    environment:
+      ROLE: web
+      HOST: 127.0.0.1
+      PORT: "8080"
+      # База — на машине админки, по частной сети
+      DATABASE_URL: postgresql://codexlab:${POSTGRES_PASSWORD:?пароль базы}@${ADMIN_IP}:5432/codexlab
+      TRUST_PROXY: "1"
+      TRUSTED_PROXIES: ""
+    volumes:
+      - data:/app/data
+    stop_grace_period: 30s
+    logging: *logging
+
+volumes:
+  caddy_data:
+  caddy_config:
+  data:

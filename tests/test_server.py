@@ -108,7 +108,7 @@ class ServerCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("frame-ancestors 'none'", response.headers["Content-Security-Policy"])
         self.assertIn("frame-src https://www.google.com https://maps.google.com;", response.headers["Content-Security-Policy"])   # карта на «О нас»
         health = await (await self.client.get("/api/health")).json()
-        self.assertEqual(health, {"app": "codexlab-site", "ok": True, "publish": True, "bot": False, "site": "git"})
+        self.assertEqual(health, {"app": "codexlab-site", "ok": True, "role": "all", "publish": True, "bot": False, "site": "git"})
 
     async def test_brand_files(self) -> None:
         brand = self.root / "site" / "brand"

@@ -16,12 +16,15 @@
   разметку для поиска обновит следующая публикация из админки.
 
 Несколько серверов с одной базой (сайт и админка на разных машинах) видят новую публикацию в течение
-CHECK_EVERY секунд, тот, кто опубликовал, — сразу.
+CHECK_EVERY секунд, тот, кто опубликовал, — сразу. Пока базы нет (машину с ней перезагружают), посетители
+получают страницу с последней публикацией, которую сервер успел прочитать: сайт не ждёт базу и не падает.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
+import logging
 import re
 import time
 from dataclasses import dataclass
@@ -29,9 +32,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import psycopg
+
 from app import seo
 from app.db import Conn, PgStore, utc_now
 
+log = logging.getLogger("site.content")
 KEEP_PUBLICATIONS = 20       # столько последних публикаций хранится — к ним можно вернуться
 CHECK_EVERY = 5.0            # как часто, в секундах, спрашивать базу, нет ли новой публикации
 
@@ -190,7 +196,11 @@ class SiteContent:
         self._file, self._store, self._every = index_file, store, check_every
         self._git_page: _GitPage | None = None
         self._latest = 0
+        self._publication: Publication | None = None
         self._checked = float("-inf")
+        self._now = True                 # следующий запрос ждёт ответа базы: страницы ещё нет или только что публиковали
+        self._task: asyncio.Task[None] | None = None   # проверка базы в фоне
+        self._offline = False            # база не ответила; сайт показывает последнее прочитанное
         self._page: LivePage | None = None
 
     @property
@@ -198,8 +208,13 @@ class SiteContent:
         return self._store is not None
 
     def invalidate(self) -> None:
-        """Следующий запрос спросит базу сразу, а не через CHECK_EVERY."""
-        self._checked = float("-inf")
+        """Следующий запрос спросит базу сразу и дождётся ответа, а не через CHECK_EVERY."""
+        self._now = True
+
+    async def checked(self) -> None:
+        """Дождаться проверки базы, начатой в фоне (для проверок)."""
+        if self._task is not None:
+            await self._task
 
     def _git(self) -> _GitPage | None:
         try:
@@ -215,15 +230,37 @@ class SiteContent:
 
     async def page(self) -> LivePage | None:
         git = self._git()
-        if self._store is not None and time.monotonic() - self._checked >= self._every:
-            self._latest = await self._store.latest_id()
-            self._checked = time.monotonic()
+        if self._store is not None:
+            if self._now or self._page is None:
+                self._now = False
+                await self._check(self._store)
+            elif time.monotonic() - self._checked >= self._every and (self._task is None or self._task.done()):
+                # Страница уже есть — посетитель её получает сразу, а базу спрашиваем в фоне: пока база
+                # не отвечает (машину с ней перезагружают), сайт не ждёт её ни секунды.
+                self._task = asyncio.create_task(self._check(self._store))
         key = f"{git.sha if git else '-'}:{self._latest}"
-        if self._page is not None and self._page.key == key:
-            return self._page
-        publication = await self._store.get(self._latest) if self._store is not None and self._latest else None
-        self._page = _compose(git, publication, key)
+        if self._page is None or self._page.key != key:
+            self._page = _compose(git, self._publication, key)
         return self._page
+
+    async def _check(self, store: SiteStore) -> None:
+        try:
+            latest = await store.latest_id()
+            if latest != self._latest:
+                self._publication = await store.get(latest) if latest else None
+                self._latest = latest
+            if self._offline:
+                log.info("тексты сайта: связь с базой восстановлена")
+            self._offline = False
+        except (psycopg.Error, OSError) as exc:
+            if not self._offline:
+                log.warning("тексты сайта: база не отвечает (%s), показываем последнюю прочитанную публикацию",
+                            type(exc).__name__)
+            self._offline = True
+        except Exception:                # ошибка в коде — в журнал; сайт работает с прочитанным раньше
+            log.exception("тексты сайта: проверка базы не удалась")
+        finally:
+            self._checked = time.monotonic()
 
     async def publish(self, html: str) -> tuple[int, bool]:
         """Запоминает публикацию из админки. Возвращает (номер, сохранена ли страница целиком).

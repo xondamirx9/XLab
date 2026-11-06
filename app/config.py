@@ -1,6 +1,7 @@
 """Настройки сервера. Читаются из файла .env рядом с проектом и из переменных окружения."""
 from __future__ import annotations
 
+import ipaddress
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -8,6 +9,10 @@ from pathlib import Path
 from app.seo import verification_code
 
 MIN_PASSWORD_LENGTH = 12
+# Роль процесса. all — всё в одном (свой компьютер, один сервер). На двух машинах:
+# web — только то, что нужно посетителям: страницы, заявки, сайты клиентов;
+# admin — админка и служебное API, бот, студия, рассылки, доставка заявок в Telegram, схема базы.
+ROLES = ("all", "web", "admin")
 BRAND = "Codex Lab"          # название студии в боте и сообщениях
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -59,6 +64,10 @@ class Config:
     indexnow: bool = False               # сообщать Bing и Яндексу о новой версии сайта (app/indexnow.py)
     admin_user_ids: tuple[int, ...] = () # люди-администраторы; личные чаты из admin_chat_ids считаются и так
     database_url: str = ""               # база PostgreSQL: postgresql://пользователь:пароль@адрес/база
+    role: str = "all"                    # all, web или admin — см. ROLES
+    # Прокси на других машинах, которым верим X-Forwarded-For: на машине админки это частный адрес машины сайта,
+    # через чей Caddy приходят запросы. Прокси на этой же машине (127.0.0.1) доверенный и так.
+    trusted_proxies: tuple[str, ...] = ()
 
     @property
     def publish_enabled(self) -> bool:
@@ -146,6 +155,20 @@ class Config:
             raise ConfigError("DATABASE_URL должен начинаться с postgresql://, например "
                               "postgresql://codexlab:пароль@localhost:5432/codexlab")
 
+        role = env("ROLE", "all").strip().lower() or "all"
+        if role not in ROLES:
+            raise ConfigError(f"ROLE: «{role}» — нет такой роли. Можно: {', '.join(ROLES)}.")
+        proxies: list[str] = []
+        for part in env("TRUSTED_PROXIES", "").replace(";", ",").split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                ipaddress.ip_network(part, strict=False)
+            except ValueError as exc:
+                raise ConfigError(f"TRUSTED_PROXIES: «{part}» не похоже на адрес или сеть, например 10.0.0.5 или 10.0.0.0/24.") from exc
+            proxies.append(part)
+
         # INDEXNOW: 1 — сообщать поисковикам о новой версии сайта, 0 — нет. Не задан — да, если сервер
         # смотрит в интернет: на Render (он сам выставляет RENDER) или задан PUBLIC_URL.
         indexnow = env("INDEXNOW", "").strip().lower()
@@ -174,4 +197,6 @@ class Config:
             search_verify=tuple(verify),
             indexnow=indexnow_on,
             database_url=database_url,
+            role=role,
+            trusted_proxies=tuple(proxies),
         )

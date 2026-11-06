@@ -1,0 +1,33 @@
+# Caddy машины сайта (compose.web.yml). Сертификаты Let's Encrypt выпускает
+# и продлевает сам. Адреса админки и служебного API передаёт на машину
+# админки по частной сети, остальное — сайту на этой машине.
+#
+# SITE_HOSTS     — домены через запятую: на репетиции new.codexlab.uz,
+#                  после переезда codexlab.uz, www.codexlab.uz
+# ADMIN_UPSTREAM — частный адрес и порт машины админки, например 10.0.0.6:8080
+#
+# Заголовок X-Forwarded-For от посетителя Caddy не пропускает, а ставит
+# свой — адрес посетителя: по нему сайт и админка считают лимиты.
+
+{$SITE_HOSTS} {
+	encode gzip
+	# Браузер год открывает сайт только по HTTPS: подменить первый заход по http:// нельзя
+	header Strict-Transport-Security "max-age=31536000"
+
+	# Публикация сайта из админки, совет агентов, проекты студии
+	@admin path /api/publish /council /council/* /api/council/* /api/studio/projects /api/studio/projects/*
+	# Новость в рассылку; читает новости (GET) сайт
+	@admin_news {
+		method POST
+		path /api/news
+	}
+	handle @admin {
+		reverse_proxy {$ADMIN_UPSTREAM}
+	}
+	handle @admin_news {
+		reverse_proxy {$ADMIN_UPSTREAM}
+	}
+	handle {
+		reverse_proxy {$WEB_UPSTREAM:127.0.0.1:8080}
+	}
+}
