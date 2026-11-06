@@ -26,6 +26,7 @@ from aiogram.types import (CallbackQuery, InlineKeyboardButton, InlineKeyboardMa
 from app.config import BRAND
 from app.rates import Rate, RateService
 from app.storage import Storage
+from app.site_content import SiteContent
 from app.web import RateLimiter
 
 log = logging.getLogger("site.brief")
@@ -411,11 +412,19 @@ def _pair(value: object, fallback: list) -> list:
 
 
 def read_pricing(index_file: Path) -> dict:
-    """Цены из настроек сайта. Битые или пропавшие значения заменяются ценами по умолчанию."""
+    """Цены из файла страницы. Битые или пропавшие значения заменяются ценами по умолчанию."""
     try:
-        found = SITE_DATA.search(index_file.read_text(encoding="utf-8"))
+        return pricing_of(index_file.read_text(encoding="utf-8"))
+    except OSError:
+        return pricing_of("")
+
+
+def pricing_of(page: str) -> dict:
+    """Цены из настроек страницы (блок site-data). Битые или пропавшие значения заменяются ценами по умолчанию."""
+    try:
+        found = SITE_DATA.search(page)
         raw = json.loads(found.group(1)).get("pricing", {}) if found else {}
-    except (OSError, ValueError, AttributeError):
+    except (ValueError, AttributeError):
         raw = {}
     raw = raw if isinstance(raw, dict) else {}
     get = lambda name: raw.get(name) if isinstance(raw.get(name), dict) else {}
@@ -432,20 +441,23 @@ def read_pricing(index_file: Path) -> dict:
 
 
 class SitePricing:
-    """Перечитывает цены, только когда админка опубликовала новую версию сайта."""
+    """Цены с живой страницы сайта: вёрстка из git, цены — последняя публикация из админки (app/site_content.py).
+    Перечитываются, только когда страница поменялась."""
 
-    def __init__(self, index_file: Path) -> None:
-        self._file = index_file
-        self._stamp: int | None = None
-        self._data = read_pricing(index_file)
+    def __init__(self, site: SiteContent) -> None:
+        self._site = site
+        self._stamp: str | None = None
+        self._data = pricing_of("")
+
+    async def fresh(self) -> dict:
+        """Цены с проверкой, не поменялась ли страница."""
+        live = await self._site.page()
+        if live is not None and live.key != self._stamp:
+            self._stamp, self._data = live.key, pricing_of(live.text)
+        return self._data
 
     def get(self) -> dict:
-        try:
-            stamp = self._file.stat().st_mtime_ns
-        except OSError:
-            return self._data
-        if stamp != self._stamp:
-            self._stamp, self._data = stamp, read_pricing(self._file)
+        """Последние прочитанные цены — для шагов конструктора; fresh() обновляет их при каждой команде."""
         return self._data
 
 
@@ -726,7 +738,7 @@ def build_brief_router(cfg_admins: tuple[int, ...], storage: Storage, pricing: S
 
     # ---------- тарифы ----------
     async def prices_view(chat_id: int, user: User | None) -> tuple[str, InlineKeyboardMarkup]:
-        lang, cur, data, rate = prefs.lang(chat_id, user), prefs.cur(chat_id), pricing.get(), await rate_now()
+        lang, cur, data, rate = prefs.lang(chat_id, user), prefs.cur(chat_id), await pricing.fresh(), await rate_now()
         rows = [f"{k['icon']} {word(k['label'], lang)} — {money(*data['types'][key]['price'], lang, cur, rate, data)}, "
                 f"{weeks_text(*map(int, data['types'][key]['weeks']), lang)}" for key, k in TYPES.items()]
         text = t("prices", lang, brand=BRAND) + "\n\n" + "\n".join(rows)
@@ -741,7 +753,7 @@ def build_brief_router(cfg_admins: tuple[int, ...], storage: Storage, pricing: S
         return (t("btn_uzs", lang), f"cur:uzs:{view}") if cur == "usd" else (t("btn_usd", lang), f"cur:usd:{view}")
 
     async def tariff_view(chat_id: int, user: User | None, key: str) -> tuple[str, InlineKeyboardMarkup]:
-        lang, cur, data, rate = prefs.lang(chat_id, user), prefs.cur(chat_id), pricing.get(), await rate_now()
+        lang, cur, data, rate = prefs.lang(chat_id, user), prefs.cur(chat_id), await pricing.fresh(), await rate_now()
         kind, price = TYPES[key], data["types"][key]
         n = len(kind["pages"])
         unit_ru, unit_uz, unit_en = kind_word(key, "unit")
@@ -1018,7 +1030,7 @@ def build_brief_router(cfg_admins: tuple[int, ...], storage: Storage, pricing: S
 
     # ---------- итог и отправка ----------
     async def summary_view(chat_id: int, user: User | None, data: dict) -> tuple[str, InlineKeyboardMarkup]:
-        lang, cur, rate, prices = prefs.lang(chat_id, user), prefs.cur(chat_id), await rate_now(), pricing.get()
+        lang, cur, rate, prices = prefs.lang(chat_id, user), prefs.cur(chat_id), await rate_now(), await pricing.fresh()
         is_bot = kind_of(data.get("type")) == "bot"
         est = estimate(data, prices)
         unset = t("not_set", lang)
@@ -1059,7 +1071,7 @@ def build_brief_router(cfg_admins: tuple[int, ...], storage: Storage, pricing: S
             return
         await callback.answer()
         data = await state.get_data()
-        prices, rate, cur = pricing.get(), await rate_now(), prefs.cur(chat_id)
+        prices, rate, cur = await pricing.fresh(), await rate_now(), prefs.cur(chat_id)
         est = estimate(data, prices)
         number_, created = await storage.add_order(
             client_id=data["oid"], name=data.get("name", ""), phone=data.get("phone", ""), telegram=data.get("tg", ""),

@@ -21,6 +21,7 @@ import aiohttp
 
 from app import seo
 from app.config import Config
+from app.site_content import SiteContent
 
 log = logging.getLogger("site.indexnow")
 
@@ -45,7 +46,9 @@ def payload(base: str, key: str, hidden: frozenset[str] | set[str] = frozenset()
 
 
 class IndexNow:
-    def __init__(self, cfg: Config, endpoint: str = ENDPOINT, start_delay: float = START_DELAY, fresh: float = FRESH) -> None:
+    def __init__(self, cfg: Config, endpoint: str = ENDPOINT, start_delay: float = START_DELAY, fresh: float = FRESH,
+                 site: SiteContent | None = None) -> None:
+        self.site = site or SiteContent(cfg.index_file, None)   # живая страница: файл и публикация из админки
         self.cfg, self.endpoint, self.start_delay, self.fresh = cfg, endpoint, start_delay, fresh
         self._wake = asyncio.Event()
         self.sent = 0                       # сколько раз поисковики приняли адреса — для проверок
@@ -54,17 +57,16 @@ class IndexNow:
         """Сайт опубликован из админки: отправить адреса заново."""
         self._wake.set()
 
-    def _site(self) -> tuple[str, frozenset[str]]:
+    async def _site(self) -> tuple[str, frozenset[str]]:
         """Адрес сайта и пустые пока страницы, которые поисковикам не отправляем."""
-        try:
-            meta = seo.read_meta(self.cfg.index_file.read_text(encoding="utf-8", errors="replace"))
-        except OSError:
+        live = await self.site.page()
+        if live is None:
             return "", frozenset()
-        return meta.site or self.cfg.public_url, meta.hidden
+        return live.meta.site or self.cfg.public_url, live.meta.hidden
 
     async def submit(self) -> bool:
         key = find_key(self.cfg.site_dir / "verify")
-        base, hidden = self._site()
+        base, hidden = await self._site()
         if not key or not base:
             log.info("IndexNow: пропускаем — %s", "нет ключа в site/verify" if not key else "неизвестен адрес сайта")
             return False
@@ -83,11 +85,9 @@ class IndexNow:
         log.warning("IndexNow: поисковики не приняли адреса, ответ %s", status)
         return False
 
-    def _fresh(self) -> bool:
-        try:
-            return time.time() - self.cfg.index_file.stat().st_mtime < self.fresh
-        except OSError:
-            return False
+    async def _fresh(self) -> bool:
+        live = await self.site.page()
+        return live is not None and time.time() - live.modified < self.fresh
 
     async def _wait(self, stop: asyncio.Event, timeout: float | None) -> None:
         waiters = [asyncio.create_task(self._wake.wait()), asyncio.create_task(stop.wait())]
@@ -101,7 +101,7 @@ class IndexNow:
         await self._wait(stop, self.start_delay)
         published = self._wake.is_set()
         self._wake.clear()
-        if not stop.is_set() and (published or self._fresh()):
+        if not stop.is_set() and (published or await self._fresh()):
             await self.submit()
         while not stop.is_set():
             await self._wait(stop, None)

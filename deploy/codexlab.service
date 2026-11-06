@@ -12,12 +12,12 @@ ExecStart=/opt/codexlab-server/venv/bin/python -m app
 Restart=always
 RestartSec=3
 Environment=PYTHONUNBUFFERED=1
-# Сервису разрешено писать только в свои папки с данными и сайтом
+# Сервису разрешено писать только в папку данных: тексты и цены сайта — в базе, site/ меняют только релизы
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-ReadWritePaths=/opt/codexlab-server/data /opt/codexlab-server/site
+ReadWritePaths=/opt/codexlab-server/data
 
 [Install]
 WantedBy=multi-user.target

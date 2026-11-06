@@ -24,6 +24,7 @@ from app.bot import Notifier, build_dispatcher, order_header, stats_text
 from app.config import Config, ConfigError
 from app.storage import Storage
 from app.web import RateLimiter, client_ip, create_app, today
+from app.site_content import SiteStore
 from pgdb import database_for
 
 PASSWORD = "очень-длинный-пароль-123"
@@ -107,7 +108,7 @@ class ServerCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("frame-ancestors 'none'", response.headers["Content-Security-Policy"])
         self.assertIn("frame-src https://www.google.com https://maps.google.com;", response.headers["Content-Security-Policy"])   # карта на «О нас»
         health = await (await self.client.get("/api/health")).json()
-        self.assertEqual(health, {"app": "codexlab-site", "ok": True, "publish": True, "bot": False})
+        self.assertEqual(health, {"app": "codexlab-site", "ok": True, "publish": True, "bot": False, "site": "git"})
 
     async def test_brand_files(self) -> None:
         brand = self.root / "site" / "brand"
@@ -174,17 +175,16 @@ class ServerCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.post("/api/publish", data="<p>не сайт</p>", headers=bearer(PASSWORD))).status, 400)
         ok = await self.client.post("/api/publish", data=new_page.encode("utf-8"), headers=bearer(PASSWORD))
         self.assertEqual(ok.status, 200)
-        self.assertEqual(self.cfg.index_file.read_text(encoding="utf-8"), new_page)
-        backups = list((self.cfg.site_dir / "backups").glob("index-*.html"))
-        self.assertEqual(len(backups), 1)
-        self.assertEqual(backups[0].read_text(encoding="utf-8"), PAGE)             # прежняя версия цела
+        self.assertEqual(await (await self.client.get("/")).text(), new_page)       # посетитель видит опубликованное
+        self.assertEqual(self.cfg.index_file.read_text(encoding="utf-8"), PAGE)     # файл из git не тронут: его меняют релизы
+        self.assertEqual(len(await SiteStore(self.storage.db).history()), 1)        # публикация — в базе
 
     async def test_publish_bruteforce_is_blocked(self) -> None:
         for _ in range(5):
             self.assertEqual((await self.client.post("/api/publish", data=PAGE, headers={"Authorization": "Bearer x"})).status, 401)
         blocked = await self.client.post("/api/publish", data=PAGE, headers={"Authorization": "Bearer " + PASSWORD})
         self.assertEqual(blocked.status, 429)
-        self.assertEqual(self.cfg.index_file.read_text(encoding="utf-8"), PAGE)
+        self.assertEqual(await SiteStore(self.storage.db).history(), [])            # ничего не опубликовано
 
     async def test_publish_disabled_without_password(self) -> None:
         client = await self._client(make_config(self.root, admin_password=""))
@@ -459,7 +459,7 @@ class AdminAccessCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.post("/api/publish", data=PAGE, headers=headers)).status, 200)
         self.assertEqual(len(self.alerts), 1)
         self.assertIn("Адрес: 8.8.4.4", self.alerts[0])
-        self.assertIn("index-", self.alerts[0])                           # имя копии для отката
+        self.assertIn("Публикация №1: страница целиком", self.alerts[0])  # номер — чтобы вернуть прежнюю
 
     async def test_alert_waits_until_telegram_is_back(self) -> None:
         notifier = Notifier(self.cfg, self.storage, self.bot)
