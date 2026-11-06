@@ -25,6 +25,8 @@
 - Сервер с Linux (Ubuntu 22.04 или новее) и доступом по SSH. Хватит самого дешёвого VPS.
 - Домен, направленный на этот сервер (запись A с IP-адресом сервера).
 - Python 3.11 или новее. Проверка: `python3 --version`.
+- PostgreSQL 14 или новее — в нём заявки, подписчики и проекты студии. В Ubuntu 24.04 это PostgreSQL 16,
+  ставится одной командой в шаге 2.
 
 **Сервер должен стоять в Узбекистане.** Закон «О персональных данных» (ЗРУ-547, статья 27-1) требует
 хранить персональные данные граждан Узбекистана на серверах внутри страны, а сервер хранит заявки с именами
@@ -45,6 +47,14 @@
 
 ## Шаг 2. Загрузить программу на сервер
 
+Поставьте PostgreSQL и заведите базу (пароль придумайте длинный — команда спросит его дважды):
+
+```bash
+sudo apt install -y postgresql
+sudo -u postgres createuser --pwprompt codexlab
+sudo -u postgres createdb --owner codexlab codexlab
+```
+
 Скопируйте папку проекта на сервер в `/opt/codexlab-server` и выполните:
 
 ```bash
@@ -55,14 +65,16 @@ venv/bin/pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Ожидаемый результат последней установки: строка `Successfully installed aiogram-... aiohttp-...`.
+Ожидаемый результат последней установки: строка `Successfully installed aiogram-... aiohttp-... psycopg-...`.
 
 ## Шаг 3. Заполнить настройки
 
 Откройте файл `.env` (`nano .env`) и впишите:
 
 - `BOT_TOKEN` — токен из шага 1;
-- `ADMIN_PASSWORD` — пароль для публикации из админки, не короче 12 символов.
+- `ADMIN_PASSWORD` — пароль для публикации из админки, не короче 12 символов;
+- `DATABASE_URL` — адрес базы из шага 2: `postgresql://codexlab:пароль@localhost:5432/codexlab`.
+  Таблицы сервер создаст сам при первом запуске.
 
 `ADMIN_CHAT_IDS` пока оставьте пустым. Затем выдайте права и закройте файл от чужих глаз:
 
@@ -137,7 +149,8 @@ sudo systemctl reload caddy
 Сервер работает и на Render (Web Service, Python). Настройки сервиса:
 
 - Branch — `main`, Build Command — `pip install -r requirements.txt`, Start Command — `python -m app`, Health Check Path — `/api/health`;
-- в Environment: `HOST=0.0.0.0`, `BOT_TOKEN`, `ADMIN_CHAT_IDS`, `ADMIN_USER_IDS` (если заявки идут в группу), `ADMIN_PASSWORD`, `PUBLIC_URL=https://ваш-сервис.onrender.com`;
+- база — Render Postgres; её Internal Database URL — в `DATABASE_URL`;
+- в Environment: `HOST=0.0.0.0`, `DATABASE_URL`, `BOT_TOKEN`, `ADMIN_CHAT_IDS`, `ADMIN_USER_IDS` (если заявки идут в группу), `ADMIN_PASSWORD`, `PUBLIC_URL=https://ваш-сервис.onrender.com`;
   для поисковиков — `GOOGLE_SITE_VERIFICATION`, `YANDEX_VERIFICATION`, `BING_SITE_VERIFICATION`, `INDEXNOW`
   (раздел «Поиск: Google, Bing и Яндекс»).
   Порт Render передаёт сам в `PORT`. `TRUST_PROXY` задавать не нужно: сервер узнаёт Render и берёт адрес посетителя
@@ -379,9 +392,10 @@ Telegram-бот перед кнопкой «Отправить заявку» п
 | --- | --- |
 | Сайт | `site/index.html` |
 | Прежние версии сайта (последние 20) | `site/backups/` |
-| Заявки | `data/orders.sqlite3` |
-| Подписчики и новости | `data/news.sqlite3` |
-| Проекты, совет агентов, уроки, заявки с сайтов клиентов | `data/studio.sqlite3` |
+| Заявки, шаги воронки | база PostgreSQL (`DATABASE_URL`), таблицы `orders`, `events` |
+| Подписчики и новости | там же: `subscribers`, `news`, `news_deliveries` |
+| Проекты, совет агентов, уроки, заявки с сайтов клиентов | там же: `projects`, `messages`, `tasks`, `lessons`, `lesson_uses`, `agent_stats`, `leads` |
+| Схема базы | `app/db.py` — нумерованные шаги `MIGRATIONS`; какие уже сделаны — таблица `schema_migrations` |
 | Сайты клиентов (все версии) | `data/sites/` |
 | Последний полученный курс доллара | `data/rate.json` |
 | Логотип и аватар бота | `docs/brand/` (SVG для светлого и тёмного фона, PNG), `docs/bot-avatar.png` |
@@ -391,7 +405,24 @@ Telegram-бот перед кнопкой «Отправить заявку» п
 | Настройки и пароли | `.env` |
 | Журнал работы | `sudo journalctl -u codexlab -n 100` |
 
-Резервная копия: скопируйте папку `data/` целиком.
+Резервная копия — база и две папки:
+
+```bash
+sudo -u postgres pg_dump -Fc codexlab > codexlab.dump      # база: заявки, подписчики, проекты студии
+tar czf codexlab-files.tgz data/ site/                     # сайты клиентов, курс, страница сайта и её прежние версии
+```
+
+Вернуть базу из копии: `sudo -u postgres pg_restore --clean --if-exists -d codexlab codexlab.dump`.
+
+**Переход со старой версии.** Раньше данные лежали в файлах `data/orders.sqlite3`, `data/news.sqlite3` и
+`data/studio.sqlite3`. Перенести их в PostgreSQL — один раз, после шага 3:
+
+```bash
+sudo -u codexlab venv/bin/python -m app.import_sqlite
+```
+
+Номера заявок и проектов сохранятся, на экране — только число строк по таблицам. В базу, где уже есть данные,
+команда ничего не переносит. Старые файлы она не трогает: удалите их, когда проверите сайт и бота.
 Вернуть прежнюю версию сайта: скопируйте нужный файл из `site/backups/` в `site/index.html`.
 
 ## Если что-то не работает
@@ -426,9 +457,22 @@ Telegram-бот перед кнопкой «Отправить заявку» п
 
 ## Проверки для разработчика
 
+Проверки идут на настоящем PostgreSQL. Один раз заведите тестовую базу:
+
+```bash
+sudo -u postgres psql -c "CREATE ROLE codexlab LOGIN PASSWORD 'codexlab'"
+sudo -u postgres createdb --owner codexlab codexlab_test
+```
+
+и запускайте:
+
 ```bash
 venv/bin/python -m unittest discover -s tests -v
 ```
+
+Адрес тестовой базы — `TEST_DATABASE_URL`, по умолчанию `postgresql://codexlab:codexlab@localhost:5432/codexlab_test`.
+Каждая проверка очищает таблицы, поэтому в имени тестовой базы обязательно слово `test`: на другой базе проверки не
+запустятся. В GitHub проверки идут сами на каждый push и PR (`.github/workflows/tests.yml`).
 
 Telegram в проверках подменён локальной заглушкой: настоящие сообщения никому не уходят.
 Claude тоже подменён: проверки не тратят деньги и проходят без ключа.

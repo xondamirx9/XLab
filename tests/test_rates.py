@@ -13,6 +13,7 @@ from aiohttp.test_utils import TestClient, TestServer
 from app.rates import CBU_URL, FRESH_FOR, MAX_AGE, NBU_URL, RETRY_AFTER, RateService, parse_cbu, parse_nbu
 from app.storage import Storage
 from app.web import create_app
+from pgdb import database_for
 from test_server import PAGE, make_config
 
 NBU = [{"title": "UAE Dirham", "code": "AED", "cb_price": "3445.67", "nbu_buy_price": "", "nbu_cell_price": "", "date": "20.10.2026 09:00:00"},
@@ -110,7 +111,7 @@ class ServiceCase(unittest.IsolatedAsyncioTestCase):
         (root / "site").mkdir()
         (root / "site" / "index.html").write_text(PAGE, encoding="utf-8")
         cfg = make_config(root)
-        storage = Storage(cfg.data_dir / "orders.sqlite3")
+        storage = Storage(await database_for(self))
         await storage.init()
         for rates, status in ((None, 503), (self.service(), 200)):
             client = TestClient(TestServer(create_app(cfg, storage, lambda: None, rates=rates)))

@@ -1,0 +1,47 @@
+# Автотесты на каждый push и PR — на настоящем PostgreSQL, как на сервере (README, «Проверки для разработчика»).
+# Репозиторий публичный: журналы видят все, поэтому в проверках только придуманные данные, без ключей и паролей.
+name: tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    # PR из ветки этого же репозитория уже проверен по push — второй раз не гоняем; PR из чужой копии — проверяем
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: codexlab
+          POSTGRES_PASSWORD: codexlab        # только для этой временной базы проверок
+          POSTGRES_DB: codexlab_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U codexlab -d codexlab_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://codexlab:codexlab@localhost:5432/codexlab_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+          cache: pip
+      - name: Зависимости
+        run: pip install -r requirements.txt
+      - name: Проверки
+        run: python -m unittest discover -s tests -v

@@ -17,6 +17,7 @@ from app.config import Config
 from app.indexnow import IndexNow
 from app.storage import Storage
 from app.web import create_app
+from pgdb import database_for
 
 ROOT = Path(__file__).resolve().parent.parent
 SITE = (ROOT / "site" / "index.html").read_text(encoding="utf-8")
@@ -140,7 +141,7 @@ class IndexNowCase(unittest.IsolatedAsyncioTestCase):
 
     async def test_server_serves_key_and_publish_wakes(self) -> None:
         woken = []
-        storage = Storage(self.root / "data" / "orders.sqlite3")
+        storage = Storage(await database_for(self))
         await storage.init()
         client = TestClient(TestServer(create_app(self.config(), storage, lambda: None, on_site_changed=lambda: woken.append(1))))
         await client.start_server()

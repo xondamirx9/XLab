@@ -58,6 +58,7 @@ class Config:
     search_verify: tuple[tuple[str, str], ...] = ()
     indexnow: bool = False               # сообщать Bing и Яндексу о новой версии сайта (app/indexnow.py)
     admin_user_ids: tuple[int, ...] = () # люди-администраторы; личные чаты из admin_chat_ids считаются и так
+    database_url: str = ""               # база PostgreSQL: postgresql://пользователь:пароль@адрес/база
 
     @property
     def publish_enabled(self) -> bool:
@@ -140,6 +141,11 @@ class Config:
                 raise ConfigError(f"{key}: не похоже на код из {where}. Нужна строка из атрибута content тега <meta>.")
             verify.append((tag, code))
 
+        database_url = env("DATABASE_URL", "").strip()
+        if database_url and not database_url.startswith(("postgresql://", "postgres://")):
+            raise ConfigError("DATABASE_URL должен начинаться с postgresql://, например "
+                              "postgresql://codexlab:пароль@localhost:5432/codexlab")
+
         # INDEXNOW: 1 — сообщать поисковикам о новой версии сайта, 0 — нет. Не задан — да, если сервер
         # смотрит в интернет: на Render (он сам выставляет RENDER) или задан PUBLIC_URL.
         indexnow = env("INDEXNOW", "").strip().lower()
@@ -167,4 +173,5 @@ class Config:
             debate_rounds=number("STUDIO_DEBATE_ROUNDS", 2, 1, 4),
             search_verify=tuple(verify),
             indexnow=indexnow_on,
+            database_url=database_url,
         )

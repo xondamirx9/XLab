@@ -6,6 +6,8 @@ import base64
 import hashlib
 import re
 import sqlite3
+
+from app.import_sqlite import ImportRefused, import_folder
 import tempfile
 import unittest
 from pathlib import Path
@@ -28,6 +30,7 @@ from app.studio.store import StudioStore
 from app.studio.worker import StudioWorker
 from app.user_bot import parse_contacts
 from app.web import StudioContext, create_app
+from pgdb import database_for
 from test_news import TelegramCase, command, press, text_message
 from test_server import PASSWORD, make_config
 
@@ -120,7 +123,7 @@ class PipelineCase(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
-        self.store = StudioStore(self.root / "studio.sqlite3")
+        self.store = StudioStore(await database_for(self))
         await self.store.init()
 
     async def asyncTearDown(self) -> None:
@@ -230,25 +233,29 @@ class PipelineCase(unittest.IsolatedAsyncioTestCase):
 
     async def test_client_cannot_revive_disabled_lesson(self) -> None:
         lesson_id = await self.store.add_lesson("critic", "Спорить ради спора", None, score=0.5)
-        await self.store._run(lambda c: c.execute("UPDATE lessons SET active = 0, score = 0 WHERE id = ?", (lesson_id,)))
+        await self.store._run(lambda c: c.execute("UPDATE lessons SET active = 0, score = 0 WHERE id = %s", (lesson_id,)))
         self.assertEqual(await self.store.add_lesson("critic", "Спорить  ради спора", 5, approved=False), lesson_id)
         lesson = (await self.store.all_lessons())[0]
         self.assertEqual((lesson["active"], lesson["score"]), (0, 0))
         await self.store.add_lesson("critic", "Спорить ради спора", None)            # повтор из проекта администратора оживляет
         self.assertEqual((await self.store.all_lessons())[0]["active"], 1)
 
-    async def test_old_database_gets_lesson_moderation(self) -> None:
-        path = self.root / "old.sqlite3"
-        with sqlite3.connect(path) as conn:
+    async def test_old_sqlite_lessons_imported_as_approved(self) -> None:
+        old = self.root / "old"
+        old.mkdir()
+        conn = sqlite3.connect(old / "studio.sqlite3")                              # файл до появления модерации уроков
+        with conn:
             conn.execute("CREATE TABLE lessons (id INTEGER PRIMARY KEY AUTOINCREMENT, agent TEXT NOT NULL, text TEXT NOT NULL, "
                          "score REAL NOT NULL DEFAULT 1, uses INTEGER NOT NULL DEFAULT 0, project_id INTEGER, "
                          "active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL)")
-            conn.execute("INSERT INTO lessons (agent, text, created_at) VALUES ('critic', 'Старый урок', '2026-01-01')")
+            conn.execute("INSERT INTO lessons (id, agent, text, created_at) VALUES (7, 'critic', 'Старый урок', '2026-01-01')")
         conn.close()
-        store = StudioStore(path)
-        await store.init()
-        await store.init()                                                          # повторный запуск не падает
-        self.assertEqual([l["text"] for l in await store.lessons_for("critic")], ["Старый урок"])
+        self.assertEqual(await import_folder(await database_for(self), old), {"lessons": 1})
+        await self.store.init()                                                     # повторный запуск схемы не падает
+        self.assertEqual([l["text"] for l in await self.store.lessons_for("critic")], ["Старый урок"])
+        self.assertEqual(await self.store.add_lesson("critic", "Новый урок", None), 8)   # номера продолжаются за перенесёнными
+        with self.assertRaises(ImportRefused):                                      # второй раз в непустую базу — нет
+            await import_folder(await database_for(self), old)
 
     async def test_create_within_limit(self) -> None:
         since = "2000-01-01T00:00:00+00:00"
@@ -275,9 +282,9 @@ class StudioWebCase(unittest.IsolatedAsyncioTestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         self.cfg = make_config(self.root)
-        storage = Storage(self.root / "orders.sqlite3")
+        storage = Storage(await database_for(self))
         await storage.init()
-        self.store = StudioStore(self.root / "studio.sqlite3")
+        self.store = StudioStore(await database_for(self))
         await self.store.init()
         self.studio = Studio(self.store, RecordingLLM, self.root / "sites")
         self.woken = 0
@@ -344,9 +351,9 @@ class StudioWebCase(unittest.IsolatedAsyncioTestCase):
 class WizardCase(TelegramCase):
     async def test_order_site_through_bot(self) -> None:
         cfg = make_config(self.root, admin_chat_ids=(111,))
-        storage = Storage(self.root / "orders.sqlite3")
+        storage = Storage(await database_for(self))
         await storage.init()
-        store = StudioStore(self.root / "studio.sqlite3")
+        store = StudioStore(await database_for(self))
         await store.init()
         studio = Studio(store, RecordingLLM, self.root / "sites")
         woken = []
@@ -387,9 +394,9 @@ class WizardCase(TelegramCase):
 
     async def test_daily_limit(self) -> None:
         cfg = make_config(self.root, admin_chat_ids=(111,), studio_daily_limit=1)
-        storage = Storage(self.root / "orders.sqlite3")
+        storage = Storage(await database_for(self))
         await storage.init()
-        store = StudioStore(self.root / "studio.sqlite3")
+        store = StudioStore(await database_for(self))
         await store.init()
         await store.create_project(BRIEF, "one", chat_id=42)
         dispatcher = build_dispatcher(cfg, storage, studio_store=store)
@@ -400,9 +407,9 @@ class WizardCase(TelegramCase):
 
     async def test_double_launch_cannot_bypass_limit(self) -> None:
         cfg = make_config(self.root, admin_chat_ids=(111,), studio_daily_limit=1)
-        storage = Storage(self.root / "orders.sqlite3")
+        storage = Storage(await database_for(self))
         await storage.init()
-        store = StudioStore(self.root / "studio.sqlite3")
+        store = StudioStore(await database_for(self))
         await store.init()
         dispatcher = build_dispatcher(cfg, storage, studio_store=store, wake_worker=lambda: None)
         async def fill_brief(chat: int, first_id: int) -> None:
@@ -423,9 +430,9 @@ class WizardCase(TelegramCase):
 
     async def test_admin_reviews_client_lessons_in_bot(self) -> None:
         cfg = make_config(self.root, admin_chat_ids=(111,))
-        storage = Storage(self.root / "orders.sqlite3")
+        storage = Storage(await database_for(self))
         await storage.init()
-        store = StudioStore(self.root / "studio.sqlite3")
+        store = StudioStore(await database_for(self))
         await store.init()
         lesson_id = await store.add_lesson("copywriter", "Писать короче", 5, approved=False)
         dispatcher = build_dispatcher(cfg, storage, studio_store=store)
@@ -443,9 +450,9 @@ class WizardCase(TelegramCase):
     async def test_group_member_cannot_press_admin_buttons(self) -> None:
         """Кнопку в служебной группе видят все, но нажать её может только администратор."""
         cfg = make_config(self.root, admin_chat_ids=(-100500,), admin_user_ids=(111,))
-        storage = Storage(self.root / "orders.sqlite3")
+        storage = Storage(await database_for(self))
         await storage.init()
-        store = StudioStore(self.root / "studio.sqlite3")
+        store = StudioStore(await database_for(self))
         await store.init()
         lesson_id = await store.add_lesson("copywriter", "Писать короче", 5, approved=False)
         dispatcher = build_dispatcher(cfg, storage, studio_store=store)

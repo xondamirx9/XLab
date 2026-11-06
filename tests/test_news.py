@@ -16,6 +16,7 @@ from aiohttp.test_utils import TestServer
 from app.bot import build_dispatcher
 from app.news import Broadcaster, NewsStore
 from app.storage import Storage
+from pgdb import database_for
 from test_server import make_config
 
 
@@ -92,7 +93,7 @@ class TelegramCase(unittest.IsolatedAsyncioTestCase):
 class NewsCase(TelegramCase):
     async def asyncSetUp(self) -> None:
         await super().asyncSetUp()
-        self.news = NewsStore(self.root / "news.sqlite3")
+        self.news = NewsStore(await database_for(self))
         await self.news.init()
 
     async def test_subscribe_counts(self) -> None:
@@ -134,7 +135,7 @@ class NewsCase(TelegramCase):
 
     async def test_bot_start_stop_post(self) -> None:
         cfg = make_config(self.root, admin_chat_ids=(111,))
-        storage = Storage(self.root / "orders.sqlite3")
+        storage = Storage(await database_for(self))
         await storage.init()
         woken = []
         dispatcher = build_dispatcher(cfg, storage, news=self.news, wake_news=lambda: woken.append(1))

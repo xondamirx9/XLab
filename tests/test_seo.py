@@ -14,6 +14,7 @@ from app import seo
 from app.config import Config, ConfigError
 from app.storage import Storage
 from app.web import create_app
+from pgdb import database_for
 
 ROOT = Path(__file__).resolve().parent.parent
 SITE = (ROOT / "site" / "index.html").read_text(encoding="utf-8")
@@ -201,7 +202,7 @@ class ServerSeoTest(unittest.IsolatedAsyncioTestCase):
         self.root = Path(self.tmp.name)
         (self.root / "site").mkdir()
         (self.root / "site" / "index.html").write_text(SITE, encoding="utf-8")
-        self.storage = Storage(self.root / "data" / "orders.sqlite3")
+        self.storage = Storage(await database_for(self))
         await self.storage.init()
 
     async def client(self, **over) -> TestClient:
