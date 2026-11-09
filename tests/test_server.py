@@ -3,6 +3,8 @@ Telegram здесь подменён локальной заглушкой: на
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
 import json
 import os
 import sqlite3
@@ -108,6 +110,27 @@ class ServerCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("frame-src https://www.google.com https://maps.google.com;", response.headers["Content-Security-Policy"])   # карта на «О нас»
         health = await (await self.client.get("/api/health")).json()
         self.assertEqual(health, {"app": "codexlab-site", "ok": True, "publish": True, "bot": False})
+
+    async def test_site_csp_allows_only_own_scripts(self) -> None:
+        boot, code = "document.documentElement.dataset.x='1'", "(() => { window.ok = 1 })()"
+        page = ('<!doctype html><html><head><script>' + boot + '</script></head><body>'
+                '<script type="application/ld+json">{"a":1}</script>'
+                '<script type="application/json" id="site-data">{}</script>'
+                '<script id="site-js">' + code + '</script></body></html>')
+        self.cfg.index_file.write_text(page, encoding="utf-8")
+        response = await self.client.get("/")
+        csp = response.headers["Content-Security-Policy"]
+        script_src = csp.split("script-src")[1].split(";")[0]
+        self.assertNotIn("unsafe-inline", script_src)                     # подставленный в страницу код не выполнится
+        sha = lambda text: "'sha256-" + base64.b64encode(hashlib.sha256(text.encode()).digest()).decode() + "'"
+        self.assertIn(sha(boot), script_src)                              # а свои скрипты страницы — разрешены по хешу
+        self.assertIn(sha(code), script_src)
+        self.assertNotIn(sha('{"a":1}'), script_src)                      # JSON-блоки не исполняются, хеш им не нужен
+        for path in ("/examples", "/about?lang=uz", "/brief?lang=en"):
+            other = await self.client.get(path)
+            self.assertNotIn("unsafe-inline", other.headers["Content-Security-Policy"].split("style-src")[0])
+        missing = await self.client.get("/api/nope")                      # остальные ответы — без встроенных скриптов вовсе
+        self.assertNotIn("unsafe-inline", missing.headers["Content-Security-Policy"].split("style-src")[0])
 
     async def test_brand_files(self) -> None:
         brand = self.root / "site" / "brand"
@@ -451,12 +474,27 @@ class AdminAccessCase(unittest.IsolatedAsyncioTestCase):
         for number in range(30):                                          # каждый раз новый адрес: лимит на адрес не срабатывает
             response = await self.client.post("/api/publish", data=PAGE, headers={**wrong, "X-Forwarded-For": f"8.8.{number}.1"})
             self.assertEqual(response.status, 401)
-        self.assertEqual(len(self.alerts), 1)
-        self.assertIn("Подбор пароля", self.alerts[0])
+        wrong_alerts = [text for text in self.alerts if "Неверный пароль" in text]
+        self.assertEqual(len(wrong_alerts), 10)                           # о каждом — но не больше 10 сообщений в час
+        self.assertIn("Подбор пароля", self.alerts[-1])                   # и одно — когда вход закрылся
+        self.assertEqual(len(self.alerts), 11)
         right = {"Authorization": f"Bearer {quote(PASSWORD)}", "X-Forwarded-For": "8.8.200.1"}
         blocked = await self.client.post("/api/publish", data=PAGE, headers=right)
         self.assertEqual(blocked.status, 429)                             # по ответу нельзя понять, что пароль верный
+        self.assertEqual(len(self.alerts), 11)
+
+    async def test_each_wrong_password_is_reported(self) -> None:
+        headers = {"Authorization": "Bearer не-тот-пароль", "X-Forwarded-For": "8.8.8.8"}
+        self.assertEqual((await self.client.post("/api/publish", data=PAGE, headers=headers)).status, 401)
         self.assertEqual(len(self.alerts), 1)
+        self.assertIn("Неверный пароль администратора", self.alerts[0])
+        self.assertIn("POST /api/publish", self.alerts[0])
+        self.assertIn("Адрес: 8.8.8.8", self.alerts[0])
+        self.assertIn("1 из 30", self.alerts[0])
+        self.assertNotIn("не-тот-пароль", self.alerts[0])                 # сам введённый пароль в чат не уходит
+        self.assertEqual((await self.client.post("/api/publish", data=PAGE, headers=headers)).status, 401)
+        self.assertEqual(len(self.alerts), 2)
+        self.assertIn("2 из 30", self.alerts[1])
 
     async def test_publish_is_reported(self) -> None:
         headers = {"Authorization": f"Bearer {quote(PASSWORD)}", "X-Forwarded-For": "8.8.4.4"}
