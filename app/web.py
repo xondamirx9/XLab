@@ -1,6 +1,7 @@
 """HTTP-часть: сайт, приём заявок, публикация новой версии сайта из админки."""
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import ipaddress
@@ -66,15 +67,43 @@ SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "X-Frame-Options": "DENY",
-    # Сайт — один файл со встроенными стилями и кодом; шрифты — с Google Fonts; картинки проектов — внутри страницы;
-    # на «О нас» — встроенная карта Google (frame-src).
+    # Шрифты — с Google Fonts; картинки проектов — внутри страницы; на «О нас» — встроенная карта Google (frame-src).
+    # Встроенных скриптов здесь не разрешено: страницу сайта сервер отдаёт со своим CSP — с хешами её скриптов
+    # (site_page_csp), поэтому чужой код, подставленный в страницу или в атрибуты on…=, браузер не выполнит.
     "Content-Security-Policy": (
-        "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+        "default-src 'self'; script-src 'self'; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; "
         "img-src 'self' data:; connect-src 'self'; frame-src https://www.google.com https://maps.google.com; "
         "frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
     ),
 }
+
+
+# Встроенный <script> без type или с type JavaScript. JSON-блоки (application/json, ld+json) браузер не выполняет.
+_INLINE_SCRIPT = re.compile(r"<script(\s[^>]*)?>(.*?)</script\s*>", re.IGNORECASE | re.DOTALL)
+_SCRIPT_TYPE = re.compile(r"""\btype\s*=\s*["']?([^"'\s>]+)""", re.IGNORECASE)
+_JS_TYPES = {"", "text/javascript", "application/javascript", "module"}
+
+
+def inline_script_hashes(html: str) -> list[str]:
+    """Хеши 'sha256-…' всех исполняемых встроенных скриптов страницы — для script-src в CSP."""
+    hashes: list[str] = []
+    for match in _INLINE_SCRIPT.finditer(html):
+        attrs, code = match.group(1) or "", match.group(2)
+        kind = _SCRIPT_TYPE.search(attrs)
+        if (kind.group(1).lower() if kind else "") not in _JS_TYPES or re.search(r"\bsrc\s*=", attrs, re.IGNORECASE):
+            continue
+        digest = "'sha256-" + base64.b64encode(hashlib.sha256(code.encode("utf-8")).digest()).decode("ascii") + "'"
+        if digest not in hashes:
+            hashes.append(digest)
+    return hashes
+
+
+def site_page_csp(html: str) -> str:
+    """CSP страницы сайта: как в SECURITY_HEADERS, но script-src разрешает только её собственные скрипты по хешам."""
+    hashes = " ".join(inline_script_hashes(html))
+    return SECURITY_HEADERS["Content-Security-Policy"].replace(
+        "script-src 'self';", f"script-src 'self' {hashes};" if hashes else "script-src 'self';", 1)
 
 
 class RateLimiter:
@@ -92,6 +121,9 @@ class RateLimiter:
 
     def blocked(self, key: str) -> bool:
         return len(self._trim(key)) >= self.limit
+
+    def count(self, key: str) -> int:
+        return len(self._trim(key))
 
     def hit(self, key: str) -> None:
         self._trim(key).append(self._clock())
@@ -213,6 +245,7 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
     order_total = RateLimiter(limit=120, window=3600)     # и не больше 120 в час со всех адресов
     auth_fails = RateLimiter(limit=5, window=900)         # 5 неверных паролей за 15 минут
     auth_total = RateLimiter(limit=30, window=3600)       # и не больше 30 в час со всех адресов: адрес можно подделать
+    auth_alerts = RateLimiter(limit=10, window=3600)      # о неверном пароле — не больше 10 сообщений в час, чтобы не засыпать чат
     event_limit = RateLimiter(limit=30, window=600)       # счётчик воронки: до 30 событий за 10 минут с адреса
 
     @web.middleware
@@ -264,10 +297,11 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
         page, meta, _ = loaded
         variant = page_cache.get((name, lang))
         if not isinstance(variant, tuple):
-            body = seo.localize_page(page, lang, meta, verify, name).encode("utf-8")
-            variant = page_cache[(name, lang)] = (body, '"' + hashlib.sha256(body).hexdigest()[:32] + '"')
-        body, etag = variant
-        headers = {"Cache-Control": "no-cache", "ETag": etag}
+            html = seo.localize_page(page, lang, meta, verify, name)
+            body = html.encode("utf-8")
+            variant = page_cache[(name, lang)] = (body, '"' + hashlib.sha256(body).hexdigest()[:32] + '"', site_page_csp(html))
+        body, etag, csp = variant
+        headers = {"Cache-Control": "no-cache", "ETag": etag, "Content-Security-Policy": csp}
         if etag in request.headers.get("If-None-Match", ""):    # страница не менялась — браузер берёт свою копию
             return web.Response(status=304, headers=headers)
         return web.Response(body=body, content_type="text/html", charset="utf-8", headers=headers)
@@ -329,6 +363,12 @@ def create_app(cfg: Config, storage: Storage, on_new_order: Callable[[], None],
             auth_fails.hit(ip)
             auth_total.hit("all")
             log.warning("%s: неверный пароль администратора, адрес %s", request.path, ip)
+            tries = auth_total.count("all")
+            if not auth_alerts.blocked("all") and not auth_total.blocked("all"):
+                auth_alerts.hit("all")
+                quiet = "\nДальше в этот час — только сообщение, если вход закроется." if auth_alerts.blocked("all") else ""
+                on_admin_action(f"⚠️ Неверный пароль администратора\nДействие: {request.method} {request.path}\n"
+                                f"Адрес: {ip}\nНеверных за час: {tries} из {auth_total.limit}{quiet}")
             if auth_total.blocked("all"):
                 log.warning("вход администратора закрыт: слишком много неверных паролей")
                 on_admin_action("🚨 Подбор пароля администратора: 30 неверных попыток за час.\n"
